@@ -1,0 +1,58 @@
+python
+import streamlit as st
+import pandas as pd
+import json
+
+st.set_page_config(page_title="Unity Node Dashboard", layout="wide")
+
+st.title("📱 Unity Node Rewards Dashboard")
+st.write("Upload your rewards JSON file to visualize your data.")
+
+# 1. File Uploader in the sidebar
+uploaded_file = st.sidebar.file_uploader("Upload rewards .txt file", type=['txt', 'json'])
+
+if uploaded_file is not None:
+    try:
+        # Load the JSON
+        data = json.load(uploaded_file)
+        df = pd.DataFrame(data)
+
+        # 2. Data Cleaning
+        df['createdAt'] = pd.to_datetime(df['createdAt'])
+        df['date'] = df['createdAt'].dt.date
+        df['rewards'] = df['amountMicros'] / 1000000
+
+        # 3. Calculations
+        total_rewards = df['rewards'].sum()
+        unique_nodes = df['nodeId'].nunique()
+        days_tracked = df['date'].nunique()
+        
+        # 4. Top Row Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Tokens Earned", f"{total_rewards:,.2f}")
+        m2.metric("Active Nodes Found", unique_nodes)
+        m3.metric("Days Tracked", days_tracked)
+
+        st.divider()
+
+        # 5. Charts
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📈 Daily Rewards Trend")
+            daily_rev = df.groupby('date')['rewards'].sum()
+            st.area_chart(daily_rev)
+
+        with col2:
+            st.subheader("🏆 Top Performing Licenses")
+            # Showing top licenses by total reward
+            license_perf = df.groupby('licenseId')['rewards'].sum().sort_values(ascending=False).head(10)
+            st.bar_chart(license_perf)
+
+        # 6. Raw Data Table
+        with st.expander("See Raw Data Table"):
+            st.dataframe(df[['createdAt', 'nodeId', 'rewards']].sort_values(by='createdAt', ascending=False))
+
+    except Exception as e:
+        st.error(f"Error: The file might not be in the correct JSON format. Details: {e}")
+else:
+    st.info("👈 Please upload your JSON/txt file in the sidebar to begin.")
