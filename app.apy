@@ -1,4 +1,4 @@
-```python
+python
 import streamlit as st
 import pandas as pd
 import json
@@ -56,4 +56,3 @@ if uploaded_file is not None:
         st.error(f"Error: The file might not be in the correct JSON format. Details: {e}")
 else:
     st.info("👈 Please upload your JSON/txt file in the sidebar to begin.")
-```
