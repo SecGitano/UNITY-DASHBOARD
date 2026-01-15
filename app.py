@@ -1,58 +1,70 @@
-python
 import streamlit as st
 import pandas as pd
 import json
 
-st.set_page_config(page_title="Unity Node Dashboard", layout="wide")
+# Set page to wide mode
+st.set_page_config(page_title="Unity Node Rewards", layout="wide")
 
 st.title("📱 Unity Node Rewards Dashboard")
-st.write("Upload your rewards JSON file to visualize your data.")
+st.markdown("Upload your rewards JSON text file to see your performance.")
 
-# 1. File Uploader in the sidebar
-uploaded_file = st.sidebar.file_uploader("Upload rewards .txt file", type=['txt', 'json'])
+# --- SIDEBAR: File Upload ---
+st.sidebar.header("Data Upload")
+uploaded_file = st.sidebar.file_uploader("Choose your rewards .txt file", type=['txt', 'json'])
 
 if uploaded_file is not None:
     try:
-        # Load the JSON
+        # Load JSON data
         data = json.load(uploaded_file)
         df = pd.DataFrame(data)
 
-        # 2. Data Cleaning
+        # --- DATA PROCESSING ---
+        # Convert timestamp to readable date
         df['createdAt'] = pd.to_datetime(df['createdAt'])
-        df['date'] = df['createdAt'].dt.date
-        df['rewards'] = df['amountMicros'] / 1000000
-
-        # 3. Calculations
-        total_rewards = df['rewards'].sum()
-        unique_nodes = df['nodeId'].nunique()
-        days_tracked = df['date'].nunique()
+        df['date_only'] = df['createdAt'].dt.date
         
-        # 4. Top Row Metrics
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Tokens Earned", f"{total_rewards:,.2f}")
-        m2.metric("Active Nodes Found", unique_nodes)
-        m3.metric("Days Tracked", days_tracked)
+        # Convert amountMicros to standard Token units (1,000,000 micros = 1 Token)
+        df['tokens'] = df['amountMicros'] / 1000000
+
+        # --- METRICS CALCULATIONS ---
+        total_tokens = df['tokens'].sum()
+        active_nodes = df['nodeId'].nunique()
+        active_licenses = df['licenseId'].nunique()
+        days_count = df['date_only'].nunique()
+        avg_daily = total_tokens / days_count if days_count > 0 else 0
+
+        # --- DISPLAY TOP METRICS ---
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Tokens", f"{total_tokens:,.2f}")
+        col2.metric("Active Nodes", active_nodes)
+        col3.metric("Licenses", active_licenses)
+        col4.metric("Daily Avg", f"{avg_daily:,.2f}")
 
         st.divider()
 
-        # 5. Charts
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("📈 Daily Rewards Trend")
-            daily_rev = df.groupby('date')['rewards'].sum()
+        # --- VISUALIZATIONS ---
+        row2_col1, row2_col2 = st.columns(2)
+
+        with row2_col1:
+            st.subheader("📈 Earnings Over Time")
+            daily_rev = df.groupby('date_only')['tokens'].sum()
             st.area_chart(daily_rev)
 
-        with col2:
+        with row2_col2:
             st.subheader("🏆 Top Performing Licenses")
-            # Showing top licenses by total reward
-            license_perf = df.groupby('licenseId')['rewards'].sum().sort_values(ascending=False).head(10)
-            st.bar_chart(license_perf)
+            # Group by licenseId to see which one makes the most
+            license_ranking = df.groupby('licenseId')['tokens'].sum().sort_values(ascending=False).head(10)
+            st.bar_chart(license_ranking)
 
-        # 6. Raw Data Table
-        with st.expander("See Raw Data Table"):
-            st.dataframe(df[['createdAt', 'nodeId', 'rewards']].sort_values(by='createdAt', ascending=False))
+        # --- DATA TABLE ---
+        st.subheader("📋 Detailed Records (Latest First)")
+        # Show specific columns for clarity
+        display_df = df[['createdAt', 'nodeId', 'licenseId', 'tokens']].sort_values(by='createdAt', ascending=False)
+        st.dataframe(display_df, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error: The file might not be in the correct JSON format. Details: {e}")
+        st.error(f"Error processing file: {e}")
+        st.info("Ensure your file starts with '[' and ends with ']' and is valid JSON.")
+
 else:
-    st.info("👈 Please upload your JSON/txt file in the sidebar to begin.")
+    st.info("👈 Please upload your rewards .txt file in the sidebar to generate the dashboard.")
