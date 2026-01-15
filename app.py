@@ -3,97 +3,74 @@ import pandas as pd
 import plotly.express as px
 import json
 
-# --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Unity Node Monitor", layout="wide", initial_sidebar_state="expanded")
+# 1. Setup & Styling
+st.set_page_config(page_title="Unity Node Monitor", layout="wide")
 
-# --- 2. DARK MODE CSS STYLING ---
 st.markdown("""
 <style>
-    /* Main Background */
-    .stApp {
-        background-color: #0E1117;
-    }
-    
-    /* Metrics (Cards) */
+    .stApp { background-color: #0E1117; }
     div[data-testid="stMetric"] {
-        background-color: #262730;
-        border: 1px solid #41444C;
-        padding: 15px 20px;
+        background-color: #1A1C24;
+        border: 1px solid #333;
+        padding: 15px;
         border-radius: 10px;
-        color: white;
     }
-    
-    /* Text Colors */
-    [data-testid="stMetricLabel"] {
-        color: #979797 !important;
-    }
-    [data-testid="stMetricValue"] {
-        color: #00FFAA !important; /* Neon Green */
-        font-size: 26px !important;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 4px 4px 0px 0px;
-        color: #FFFFFF;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #262730;
-        border-bottom: 2px solid #00FFAA;
-        color: #00FFAA;
-    }
+    [data-testid="stMetricValue"] { color: #00FFCC !important; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [aria-selected="true"] { background-color: #00FFCC !important; color: black !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. SIDEBAR ---
+# 2. Sidebar
 with st.sidebar:
-    st.header("⚡ Node Settings")
-    uploaded_file = st.file_uploader("Upload JSON File", type=['txt', 'json'])
-    st.divider()
+    st.header("⚡ Settings")
+    uploaded_file = st.file_uploader("Upload JSON .txt", type=['txt', 'json'])
     token_price = st.number_input("Token Price ($)", value=0.0125, format="%.4f")
-    st.info("💡 Tip: Double-click the chart to reset the zoom.")
 
-# --- 4. MAIN APP ---
-if uploaded_file is not None:
+# 3. App Logic
+if uploaded_file:
     try:
-        # Load & Clean Data
         data = json.load(uploaded_file)
         df = pd.DataFrame(data)
-        
-        # Transformations
         df['createdAt'] = pd.to_datetime(df['createdAt'])
         df['date'] = df['createdAt'].dt.date
         df['tokens'] = df['amountMicros'] / 1000000
-        df['usd_value'] = df['tokens'] * token_price
 
-        # Header
         st.title("🚀 Rewards Dashboard")
-        st.markdown(f"**Status:** Tracking {len(df)} Reward Events")
+        
+        # Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Tokens", f"{df['tokens'].sum():,.2f}")
+        m2.metric("USD Value", f"${(df['tokens'].sum() * token_price):,.2f}")
+        m3.metric("Daily Avg", f"{(df['tokens'].sum() / df['date'].nunique()):,.2f}")
+        m4.metric("Licenses", df['licenseId'].nunique())
 
-        # --- TOP METRICS ROW ---
-        total_tokens = df['tokens'].sum()
-        total_usd = total_tokens * token_price
-        active_nodes = df['nodeId'].nunique()
-        best_day = df.groupby('date')['tokens'].sum().max()
+        # Tabs
+        tab1, tab2, tab3 = st.tabs(["📊 Trends", "🔍 License Drill-down", "📜 Logs"])
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Balance", f"{total_tokens:,.2f} 🪙")
-        c2.metric("Portfolio Value", f"${total_usd:,.2f}")
-        c3.metric("Active Nodes", f"{active_nodes}")
-        c4.metric("Best Day", f"{best_day:,.2f} 🪙")
-
-        st.divider()
-
-        # --- TABS ---
-        tab1, tab2, tab3 = st.tabs(["📈 Growth Chart", "🔍 Node Performance", "📝 Log Data"])
-
-        # TAB 1: Main Chart
         with tab1:
-            st.subheader("Accumulated Rewards")
-            daily_
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                daily = df.groupby('date')['tokens'].sum().reset_index()
+                fig1 = px.area(daily, x='date', y='tokens', template='plotly_dark', color_discrete_sequence=['#00FFCC'], title="Daily Growth")
+                st.plotly_chart(fig1, use_container_width=True)
+            with c2:
+                nodes = df.groupby('nodeId')['tokens'].sum().reset_index().sort_values('tokens', ascending=False).head(10)
+                fig2 = px.bar(nodes, x='tokens', y='nodeId', orientation='h', template='plotly_dark', title="Top Nodes")
+                fig2.update_layout(yaxis={'visible': False})
+                st.plotly_chart(fig2, use_container_width=True)
+
+        with tab2:
+            selection = st.selectbox("Select License ID", df['licenseId'].unique())
+            lic_df = df[df['licenseId'] == selection].sort_values('createdAt')
+            st.info(f"Earned: {lic_df['tokens'].sum():,.4f} | Events: {len(lic_df)}")
+            fig3 = px.line(lic_df, x='createdAt', y='tokens', template='plotly_dark', title="License History")
+            st.plotly_chart(fig3, use_container_width=True)
+
+        with tab3:
+            st.dataframe(df[['createdAt', 'licenseId', 'nodeId', 'tokens']].sort_values('createdAt', ascending=False), use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Error: {e}")
+else:
+    st.info("👈 Please upload your rewards file in the sidebar to start.")
