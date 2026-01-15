@@ -3,101 +3,97 @@ import pandas as pd
 import plotly.express as px
 import json
 
-# 1. Page Configuration
-st.set_page_config(page_title="Unity Node Pro Dashboard", layout="wide", initial_sidebar_state="expanded")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Unity Node Monitor", layout="wide", initial_sidebar_state="expanded")
 
-# 2. Custom CSS for Dark Theme & Cards
+# --- 2. DARK MODE CSS STYLING ---
 st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] { font-size: 28px; color: #00FFCC; }
-    div.stMetric {
-        background-color: #1E1E1E;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #333;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+<style>
+    /* Main Background */
+    .stApp {
+        background-color: #0E1117;
     }
-    .main { background-color: #0E1117; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# 3. Sidebar
-st.sidebar.title("💎 Unity Node Pro")
-uploaded_file = st.sidebar.file_uploader("Upload rewards .txt file", type=['txt', 'json'])
-token_price = st.sidebar.number_input("Token Price (USD)", value=0.00, format="%.4f")
-
-# 4. Helper Function: Load Data
-@st.cache_data
-def process_data(file):
-    data = json.load(file)
-    df = pd.DataFrame(data)
-    df['createdAt'] = pd.to_datetime(df['createdAt'])
-    df['date'] = df['createdAt'].dt.date
-    df['tokens'] = df['amountMicros'] / 1000000
-    if token_price > 0:
-        df['usd_val'] = df['tokens'] * token_price
-    return df
-
-# 5. Dashboard Logic
-if uploaded_file:
-    df = process_data(uploaded_file)
     
-    # --- HEADER STATS ---
-    total_tokens = df['tokens'].sum()
-    unique_licenses = df['licenseId'].nunique()
-    total_usd = total_tokens * token_price
+    /* Metrics (Cards) */
+    div[data-testid="stMetric"] {
+        background-color: #262730;
+        border: 1px solid #41444C;
+        padding: 15px 20px;
+        border-radius: 10px;
+        color: white;
+    }
     
-    st.title("📊 Node Rewards Overview")
+    /* Text Colors */
+    [data-testid="stMetricLabel"] {
+        color: #979797 !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: #00FFAA !important; /* Neon Green */
+        font-size: 26px !important;
+    }
     
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Tokens", f"{total_tokens:,.2f} 🟢")
-    with col2:
-        st.metric("Active Licenses", f"{unique_licenses}")
-    with col3:
-        st.metric("Total USD", f"${total_usd:,.2f}")
-    with col4:
-        st.metric("Avg Reward", f"{(total_tokens/df['date'].nunique()):,.2f}")
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 4px 4px 0px 0px;
+        color: #FFFFFF;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #262730;
+        border-bottom: 2px solid #00FFAA;
+        color: #00FFAA;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    # --- TABS SYSTEM ---
-    tab1, tab2, tab3 = st.tabs(["📈 Growth & Trends", "🏆 License Rankings", "📋 Raw Records"])
+# --- 3. SIDEBAR ---
+with st.sidebar:
+    st.header("⚡ Node Settings")
+    uploaded_file = st.file_uploader("Upload JSON File", type=['txt', 'json'])
+    st.divider()
+    token_price = st.number_input("Token Price ($)", value=0.0125, format="%.4f")
+    st.info("💡 Tip: Double-click the chart to reset the zoom.")
 
-    with tab1:
-        st.subheader("Rewards Accumulation (Interactive)")
-        daily_rev = df.groupby('date')['tokens'].sum().reset_index()
+# --- 4. MAIN APP ---
+if uploaded_file is not None:
+    try:
+        # Load & Clean Data
+        data = json.load(uploaded_file)
+        df = pd.DataFrame(data)
         
-        # Interactive Plotly Chart
-        fig = px.area(daily_rev, x='date', y='tokens', 
-                      title="Daily Token Generation",
-                      color_discrete_sequence=['#00FFCC'])
-        fig.update_layout(template="plotly_dark", hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
+        # Transformations
+        df['createdAt'] = pd.to_datetime(df['createdAt'])
+        df['date'] = df['createdAt'].dt.date
+        df['tokens'] = df['amountMicros'] / 1000000
+        df['usd_value'] = df['tokens'] * token_price
 
-    with tab2:
-        st.subheader("Performance by License")
-        license_df = df.groupby('licenseId')['tokens'].sum().sort_values(ascending=False).reset_index()
-        
-        # Interactive Bar Chart
-        fig2 = px.bar(license_df.head(15), x='tokens', y='licenseId', 
-                      orientation='h', color='tokens',
-                      title="Top 15 Licenses",
-                      color_continuous_scale='Viridis')
-        fig2.update_layout(template="plotly_dark")
-        st.plotly_chart(fig2, use_container_width=True)
-        
-        # Dropdown to inspect a specific License
+        # Header
+        st.title("🚀 Rewards Dashboard")
+        st.markdown(f"**Status:** Tracking {len(df)} Reward Events")
+
+        # --- TOP METRICS ROW ---
+        total_tokens = df['tokens'].sum()
+        total_usd = total_tokens * token_price
+        active_nodes = df['nodeId'].nunique()
+        best_day = df.groupby('date')['tokens'].sum().max()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Balance", f"{total_tokens:,.2f} 🪙")
+        c2.metric("Portfolio Value", f"${total_usd:,.2f}")
+        c3.metric("Active Nodes", f"{active_nodes}")
+        c4.metric("Best Day", f"{best_day:,.2f} 🪙")
+
         st.divider()
-        selected_license = st.selectbox("🔍 Select a License to Drill Down:", df['licenseId'].unique())
-        specific_license_data = df[df['licenseId'] == selected_license]
-        st.write(f"History for License: {selected_license}")
-        st.dataframe(specific_license_data[['createdAt', 'tokens']].sort_values(by='createdAt', ascending=False))
 
-    with tab3:
-        st.subheader("Complete Log History")
-        st.write("Use the search icon on the table to find specific Node IDs or dates.")
-        st.dataframe(df[['createdAt', 'licenseId', 'nodeId', 'tokens']].sort_values(by='createdAt', ascending=False), use_container_width=True)
+        # --- TABS ---
+        tab1, tab2, tab3 = st.tabs(["📈 Growth Chart", "🔍 Node Performance", "📝 Log Data"])
 
-else:
-    st.info("👋 Welcome! Please upload your Unity rewards .txt file in the sidebar to populate the dashboard.")
-    # Show a placeholder image or some instructions
-    st.image("https://images.unsplash.com/photo-1639762681485-074b7f938ba0?auto=format&fit=crop&q=80&w=1000", caption="Unity Node Monitoring Powered by AI")
+        # TAB 1: Main Chart
+        with tab1:
+            st.subheader("Accumulated Rewards")
+            daily_
