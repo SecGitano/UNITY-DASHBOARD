@@ -145,4 +145,17 @@ if raw_input:
         
         # Clean column names for Streamlit
         pivot_7d.columns = [d.strftime('%Y-%m-%d') for d in pivot_7d.columns]
-        matrix = pd.merge(lic
+        matrix = pd.merge(lic_total, pivot_7d, left_index=True, right_index=True, how='left').fillna(0)
+        
+        conf = {"TOTAL_USD": st.column_config.NumberColumn("LIFETIME TOTAL", format="$ %.4f")}
+        for d in date_list:
+            ds = d.strftime('%Y-%m-%d')
+            if ds in matrix.columns:
+                conf[ds] = st.column_config.NumberColumn(d.strftime('%b %d'), format="$ %.4f")
+
+        st.dataframe(matrix.sort_values('TOTAL_USD', ascending=False), column_config=conf, use_container_width=True)
+
+    else:
+        st.error(f"📡 SYNC FAILED: {err}")
+else:
+    st.info("👈 Authentication Required. Paste Bearer Token in sidebar to initialize.")
