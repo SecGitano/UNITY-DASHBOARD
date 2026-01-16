@@ -1,3 +1,1 @@
-pandas
-streamlit
-plotly
+pip install streamlit requests pandas plotly
