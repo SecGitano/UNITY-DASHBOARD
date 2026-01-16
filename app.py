@@ -27,11 +27,8 @@ raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
 
 # --- UTILITIES ---
 def format_id(id_val):
-    """Truncates ID to 4chars...4chars"""
     s = str(id_val)
-    if len(s) > 10:
-        return f"{s[:4]}...{s[-4:]}"
-    return s
+    return f"{s[:4]}...{s[-4:]}" if len(s) > 10 else s
 
 def parse_balance(data):
     try:
@@ -63,12 +60,12 @@ def sync_data(token):
         a_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), 'amount')
 
         df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
-        df['date'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
         
-        # Apply ID Masking
-        df['NODE_ID_FULL'] = df[node_col] # Keep original for grouping
+        # Keep full IDs for math, formatted for display
+        df['NODE_ID_RAW'] = df[node_col]
         df['NODE_ID'] = df[node_col].apply(format_id)
+        df['LIC_ID_RAW'] = df[lic_col]
         df['LIC_ID'] = df[lic_col].apply(format_id)
         
         return df, true_balance, None
@@ -82,75 +79,88 @@ if raw_input:
     df, balance, err = sync_data(raw_input)
     
     if df is not None:
-        # --- TOP METRICS ---
-        total_nodes = df['NODE_ID_FULL'].nunique()
-        total_lics = df['LIC_ID'].nunique()
-        node_sum = df['usd_amount'].sum()
-        bonus = max(0, balance - node_sum)
-
+        # --- CALCULATIONS ---
+        now = datetime.now()
+        seven_days_ago = now - timedelta(days=7)
+        
+        # 7-Day Rewards Sum
+        rewards_7d = df[df['timestamp'] >= seven_days_ago]['usd_amount'].sum()
+        history_total = df['usd_amount'].sum()
+        
+        # TOP METRICS
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("TOTAL BALANCE", f"${balance:,.2f}")
-        m2.metric("UNIQUE NODES", total_nodes)
-        m3.metric("ACTIVE LICENSES", total_lics)
-        m4.metric("BONUS / OTHER", f"${bonus:,.2f}")
-
-        st.markdown("---")
-
-        # --- NODE SUMMARY ---
-        st.subheader("// NODE_PERFORMANCE_LOG")
-        node_stats = df.groupby('NODE_ID').agg({
-            'LIC_ID': 'nunique',
-            'usd_amount': 'sum'
-        }).reset_index().rename(columns={'LIC_ID': 'Licenses', 'usd_amount': 'Rewards ($)'})
+        m2.metric("HISTORY TOTAL", f"${history_total:,.2f}")
         
-        st.dataframe(node_stats.sort_values('Rewards ($)', ascending=False), 
-                     column_config={"Rewards ($)": st.column_config.NumberColumn(format="$ %.4f")},
-                     hide_index=True, use_container_width=True)
+        # "REWARDS LAST 7 DAYS" - Calculation: Balance - (Balance minus last 7 days of recorded rewards)
+        # Essentially showing the 7-day delta in this slot as requested.
+        m3.metric("REWARDS LAST 7 DAYS", f"${rewards_7d:,.2f}")
+        
+        # 24H Earning
+        yesterday = now - timedelta(days=1)
+        last_24h = df[df['timestamp'] >= yesterday]['usd_amount'].sum()
+        m4.metric("24H VELOCITY", f"+${last_24h:,.4f}")
 
         st.markdown("---")
 
-        # --- 7-DAY MATRIX FIX ---
+        # --- NODE PERFORMANCE LOG ---
+        st.subheader("// NODE_PERFORMANCE_LOG")
+        
+        # 1. Filter for 7 days
+        df_7d = df[df['timestamp'] >= seven_days_ago]
+        
+        # 2. Build grouped stats
+        node_stats = df.groupby('NODE_ID').agg({
+            'LIC_ID_RAW': 'nunique',
+            'usd_amount': 'sum'
+        }).reset_index().rename(columns={'LIC_ID_RAW': 'Licenses', 'usd_amount': 'Total Rewards ($)'})
+        
+        # 3. Calculate 7-day total per node
+        node_7d = df_7d.groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Total'})
+        
+        # 4. Merge and calculate averages
+        node_stats = pd.merge(node_stats, node_7d, on='NODE_ID', how='left').fillna(0)
+        
+        node_stats['Avg / License'] = node_stats['Total Rewards ($)'] / node_stats['Licenses']
+        node_stats['Avg / Day (7D)'] = node_stats['7D_Total'] / 7
+        
+        st.dataframe(
+            node_stats.sort_values('Total Rewards ($)', ascending=False),
+            column_config={
+                "Total Rewards ($)": st.column_config.NumberColumn("TOTAL", format="$ %.4f"),
+                "Avg / License": st.column_config.NumberColumn("AVG / LIC", format="$ %.4f"),
+                "Avg / Day (7D)": st.column_config.NumberColumn("AVG DAILY (7D)", format="$ %.4f")
+            },
+            hide_index=True, use_container_width=True
+        )
+
+        st.markdown("---")
+
+        # --- 7-DAY MATRIX (License Table) ---
         st.subheader("// LICENSE_PERFORMANCE_MATRIX (7D)")
         
-        # Create dates and string versions for columns
-        today = datetime.now().date()
-        date_list = [(today - timedelta(days=i)) for i in range(1, 8)]
-        date_str_list = [d.strftime('%Y-%m-%d') for d in date_list]
+        today_date = now.date()
+        date_list = [(today_date - timedelta(days=i)) for i in range(1, 8)]
         
-        # Lifetime total per License
         lic_total = df.groupby('LIC_ID')['usd_amount'].sum().rename('TOTAL_USD')
+        df['date_only'] = df['timestamp'].dt.date
+        pivot_7d = df[df['date_only'].isin(date_list)].pivot_table(
+            index='LIC_ID', columns='date_only', values='usd_amount', aggfunc='sum'
+        ).fillna(0)
         
-        # Last 7 Days Pivot
-        df_7d = df[df['date'].isin(date_list)].copy()
-        if not df_7d.empty:
-            pivot_7d = df_7d.pivot_table(index='LIC_ID', columns='date', values='usd_amount', aggfunc='sum').fillna(0)
-            # CRITICAL FIX: Convert column names (date objects) to strings
-            pivot_7d.columns = [d.strftime('%Y-%m-%d') for d in pivot_7d.columns]
-            
-            # Merge
-            matrix = pd.merge(lic_total, pivot_7d, left_index=True, right_index=True, how='left').fillna(0)
-            matrix = matrix.sort_values('TOTAL_USD', ascending=False)
-            
-            # Build Config
-            conf = {"TOTAL_USD": st.column_config.NumberColumn("TOTAL", format="$ %.4f")}
-            for ds in date_str_list:
-                if ds in matrix.columns:
-                    # Clean up the display name to "Jan 16"
-                    clean_name = datetime.strptime(ds, '%Y-%m-%d').strftime('%b %d')
-                    conf[ds] = st.column_config.NumberColumn(clean_name, format="$ %.4f")
+        # String conversion for column names to prevent Streamlit crash
+        pivot_7d.columns = [d.strftime('%Y-%m-%d') for d in pivot_7d.columns]
+        matrix = pd.merge(lic_total, pivot_7d, left_index=True, right_index=True, how='left').fillna(0)
+        
+        conf = {"TOTAL_USD": st.column_config.NumberColumn("TOTAL", format="$ %.4f")}
+        for d in date_list:
+            ds = d.strftime('%Y-%m-%d')
+            if ds in matrix.columns:
+                conf[ds] = st.column_config.NumberColumn(d.strftime('%b %d'), format="$ %.4f")
 
-            st.dataframe(matrix, column_config=conf, use_container_width=True)
-        else:
-            st.info("No activity recorded in the last 7 days.")
-
-        # --- GRAPHIC ---
-        st.markdown("---")
-        daily_flow = df.set_index('timestamp').resample('D')['usd_amount'].sum().reset_index()
-        fig = px.area(daily_flow, x='timestamp', y='usd_amount', template="plotly_dark", title="// ACCUMULATION_VELOCITY")
-        fig.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)')
-        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(matrix.sort_values('TOTAL_USD', ascending=False), column_config=conf, use_container_width=True)
 
     else:
         st.error(f"📡 SYNC ERROR: {err}")
 else:
-    st.info("👈 Paste Bearer Token in sidebar to initialize terminal.")
+    st.info("👈 Paste Bearer Token in sidebar to sync your node data.")
