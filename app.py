@@ -2,10 +2,9 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 
-# --- CONFIG & AUTH ---
+# --- CONFIG ---
 BASE_URL = "https://api.unityedge.io/rest/v1/rpc"
 URL_ALLOCATIONS = f"{BASE_URL}/rewards_get_allocations"
 URL_BALANCE = f"{BASE_URL}/rewards_get_balance"
@@ -16,123 +15,94 @@ HEADERS = {
     "authority": "api.unityedge.io",
     "apikey": "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c",
     "authorization": f"Bearer {RAW_TOKEN}",
-    "content-type": "application/json"
+    "content-type": "application/json",
+    "user-agent": "Mozilla/5.0"
 }
 
-# --- STYLING (Industrial/Dark) ---
-st.set_page_config(page_title="UNITY_CORE // COMMAND", layout="wide")
+st.set_page_config(page_title="UNITY_CORE // TERMINAL", layout="wide")
 
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono&display=swap');
-    .stApp { background-color: #0d1117; font-family: 'JetBrains+Mono', monospace; }
-    
-    /* Neon Glow Metrics */
-    div[data-testid="stMetric"] {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-bottom: 3px solid #00f2ff;
-        padding: 20px; border-radius: 4px;
-    }
-    h1, h2, h3 { font-family: 'Orbitron', sans-serif; color: #f0f6fc; }
-    .pulse { height: 10px; width: 10px; background: #00f2ff; border-radius: 50%; display: inline-block; animation: blink 2s infinite; margin-right: 8px; }
-    @keyframes blink { 0% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
-    </style>
-    """, unsafe_allow_html=True)
+# --- DATA FETCHING ---
 
-# --- DATA ENGINE ---
-def fetch_balance():
-    """Gets the True Total Balance"""
+def get_allocations():
+    """Fetches history records"""
     try:
-        # Check if the payload needs a specific arg, usually {} is fine for RPC summary
-        r = requests.post(URL_BALANCE, headers=HEADERS, json={}, timeout=10)
-        # Note: If this returns a list, we take the first item. If a dict, we take the value.
-        res = r.json()
-        if isinstance(res, list): return float(res[0].get('balance', 0)) / 1_000_000
-        if isinstance(res, dict): return float(res.get('balance', 0)) / 1_000_000
-        return float(res) / 1_000_000
-    except: return 0.0
-
-@st.cache_data(ttl=60)
-def fetch_all_data():
-    try:
-        # 1. Fetch Total Balance (The $234 number)
-        true_balance = fetch_balance()
-        
-        # 2. Fetch Allocation History
         r = requests.post(URL_ALLOCATIONS, headers=HEADERS, json={"skip": None, "take": None}, timeout=10)
-        df = pd.DataFrame(r.json())
+        if r.status_code == 200:
+            df = pd.DataFrame(r.json())
+            # Clean columns
+            date_col = next((c for c in df.columns if 'created' in c or 'time' in c), None)
+            amt_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), None)
+            if date_col and amt_col:
+                df['timestamp'] = pd.to_datetime(df[date_col])
+                df['usd_amount'] = pd.to_numeric(df[amt_col]) / 1_000_000
+                return df
+        return None
+    except Exception as e:
+        st.error(f"Allocations Error: {e}")
+        return None
+
+def get_true_balance():
+    """Fetches total balance from the summary endpoint"""
+    try:
+        r = requests.post(URL_BALANCE, headers=HEADERS, json={}, timeout=10)
+        data = r.json()
         
-        # 3. Clean and Convert
-        df['timestamp'] = pd.to_datetime(df['created_at'])
-        df['usd_amount'] = pd.to_numeric(df['amount']) / 1_000_000
-        
-        return df, true_balance
-    except:
-        return None, 0.0
+        # Supabase RPCs often return a list with one object: [{"rewards_get_balance": 234000000}]
+        if isinstance(data, list) and len(data) > 0:
+            # Try to find a numeric value in the first item
+            first_item = data[0]
+            # It might be named 'balance' or the name of the function
+            val = first_item.get('balance') or first_item.get('rewards_get_balance') or list(first_item.values())[0]
+            return float(val) / 1_000_000
+        return None
+    except Exception as e:
+        # We don't crash the app here, just return None
+        return None
 
-df, true_total = fetch_all_data()
+# --- EXECUTION ---
 
-# --- RENDER DASHBOARD ---
+df = get_allocations()
+true_balance = get_true_balance()
 
-# Header
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.markdown("<h1><span style='color:#00f2ff'>█</span> UNITY_CORE <span style='color:#8b949e;'>SYNC_v2</span></h1>", unsafe_allow_html=True)
-with c2:
-    st.markdown(f"<div style='text-align:right; padding-top:20px;'><span class='pulse'></span><span style='color:#00f2ff'>CORE_READY</span></div>", unsafe_allow_html=True)
+# --- UI RENDER ---
+
+st.markdown("<h1 style='color:#00f2ff;'>UNITY_CORE <span style='color:white;'>TERMINAL</span></h1>", unsafe_allow_html=True)
 
 if df is not None:
-    # 1. TOP METRICS
-    m1, m2, m3, m4 = st.columns(4)
+    # SUCCESS: Dashboard display
+    m1, m2, m3 = st.columns(3)
     
-    # We use the TRUE TOTAL from the balance endpoint here
-    m1.metric("TRUE ACCOUNT BALANCE", f"${true_total:,.2f} USD")
+    # Use true_balance if we got it, otherwise fall back to the sum of allocations
+    display_total = true_balance if true_balance is not None else df['usd_amount'].sum()
     
-    # Calculate difference (Referrals/Leasing/Bonuses)
-    allocation_total = df['usd_amount'].sum()
-    hidden_diff = true_total - allocation_total
-    
-    m2.metric("ALLOCATED HISTORY", f"${allocation_total:,.2f} USD")
-    m3.metric("OTHER REWARDS", f"${hidden_diff:,.2f} USD", help="Bonuses, Referrals, or Uncategorized income")
-    
-    # Calculate 24h Change
-    last_24h = df[df['timestamp'] > (datetime.now() - pd.Timedelta(hours=24))]['usd_amount'].sum()
-    m4.metric("24H VELOCITY", f"+${last_24h:,.4f}", delta_color="normal")
+    m1.metric("TOTAL BALANCE", f"${display_total:,.2f} USD")
+    m2.metric("RECORDS FOUND", len(df))
+    m3.metric("STATUS", "ONLINE" if true_balance else "PARTIAL SYNC")
 
-    st.markdown("---")
+    # Chart
+    daily = df.set_index('timestamp').resample('D')['usd_amount'].sum().reset_index()
+    fig = px.area(daily, x='timestamp', y='usd_amount', template="plotly_dark")
+    fig.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)')
+    st.plotly_chart(fig, use_container_width=True)
 
-    # 2. VISUALS
-    col_left, col_right = st.columns([2, 1])
-    
-    with col_left:
-        st.markdown("### // ACCUMULATION_TIMELINE")
-        daily = df.set_index('timestamp').resample('D')['usd_amount'].sum().reset_index()
-        fig = px.area(daily, x='timestamp', y='usd_amount', template="plotly_dark")
-        fig.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)')
-        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(l=0,r=0,t=20,b=0))
-        st.plotly_chart(fig, use_container_width=True)
+    # Raw Data
+    st.dataframe(df.sort_values('timestamp', ascending=False), use_container_width=True)
 
-    with col_right:
-        st.markdown("### // BALANCE_DISTRIBUTION")
-        fig_pie = go.Figure(data=[go.Pie(
-            labels=['Allocations', 'Other Rewards'],
-            values=[allocation_total, hidden_diff],
-            hole=.6,
-            marker_colors=['#00f2ff', '#7000ff']
-        )])
-        fig_pie.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', showlegend=False, height=350)
-        st.plotly_chart(fig_pie, use_container_width=True)
+    if true_balance is None:
+        st.info("💡 Note: Total Balance endpoint is currently unreachable. Showing sum of history instead.")
 
-    # 3. LOGS
-    st.markdown("### // TRANSACTION_RECORDS")
-    st.dataframe(
-        df.sort_values('timestamp', ascending=False),
-        column_config={
-            "timestamp": st.column_config.DatetimeColumn("DATE"),
-            "usd_amount": st.column_config.NumberColumn("USD_VAL", format="$ %.6f")
-        },
-        use_container_width=True, hide_index=True
-    )
 else:
-    st.error("CORE_SYNC_FAILURE: Check your Bearer token in the script.")
+    # FAILURE: Show raw debug info
+    st.error("📡 CORE_SYNC_FAILURE")
+    st.write("The script could not retrieve your allocation history.")
+    
+    with st.expander("🛠️ DEBUG: VIEW RAW API RESPONSES"):
+        st.write("Testing connection to Allocations...")
+        test_r = requests.post(URL_ALLOCATIONS, headers=HEADERS, json={"skip": None, "take": None})
+        st.write(f"Status: {test_r.status_code}")
+        st.json(test_r.json())
+        
+        st.write("Testing connection to Balance...")
+        test_b = requests.post(URL_BALANCE, headers=HEADERS, json={})
+        st.write(f"Status: {test_b.status_code}")
+        st.json(test_b.json())
