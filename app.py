@@ -10,7 +10,7 @@ API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
-st.set_page_config(page_title="UNITY_CORE // MASTER_TERMINAL", layout="wide")
+st.set_page_config(page_title="UNITY_CORE // VAL's MASTER TERMINAL", layout="wide")
 
 # --- UI THEME ---
 st.markdown("""
