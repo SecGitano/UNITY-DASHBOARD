@@ -9,7 +9,7 @@ API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
-st.set_page_config(page_title="UNITY_CORE // ANALYTICS", layout="wide")
+st.set_page_config(page_title="UNITY_CORE // DEEP_SYNC", layout="wide")
 
 # --- UI THEME ---
 st.markdown("""
@@ -21,18 +21,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR: ACCESS CONTROL & GUIDE ---
 st.sidebar.title("🔐 ACCESS CONTROL")
-
-with st.sidebar.expander("❓ HOW TO GET YOUR BEARER TOKEN"):
-    st.markdown("""
-    1. Open **manage.unitynodes.io** in Chrome/Edge and login.
-    2. Press **F12** (Network tab).
-    3. **Refresh the page**.
-    4. Find the `rewards_get_allocations` request.
-    5. Copy the long string *after* 'Bearer' in the Authorization header.
-    """)
-
 raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
 
 # --- UTILITIES ---
@@ -50,26 +39,57 @@ def parse_balance(data):
         return 0.0
     except: return 0.0
 
+# --- UPDATED DEEP SYNC FUNCTION ---
 def sync_data(token):
     clean_token = token.strip().replace('Bearer ', '')
     headers = {"apikey": API_KEY, "authorization": f"Bearer {clean_token}", "content-type": "application/json"}
+    
     try:
+        # 1. Fetch Balance
         r_bal = requests.post(API_URL_BAL, headers=headers, json={}, timeout=10)
         true_balance = parse_balance(r_bal.json()) / 1_000_000
 
-        r_his = requests.post(API_URL_HIS, headers=headers, json={"skip": None, "take": None}, timeout=10)
-        raw_history = r_his.json()
-        if isinstance(raw_history, dict): raw_history = [raw_history]
+        # 2. Deep Fetch History (Pagination Loop)
+        all_records = []
+        skip = 0
+        batch_size = 1000 # Standard limit
+        
+        # We use a placeholder to show progress
+        status_text = st.empty()
+        
+        while True:
+            status_text.text(f"⏳ Synchronizing data... (Fetched {skip} records)")
+            payload = {"skip": skip, "take": batch_size}
             
-        df = pd.DataFrame(raw_history)
-        if df.empty: return None, true_balance, "No history found."
+            r_his = requests.post(API_URL_HIS, headers=headers, json=payload, timeout=15)
+            batch = r_his.json()
+            
+            # If we get an error or empty list, stop
+            if not isinstance(batch, list) or len(batch) == 0:
+                break
+                
+            all_records.extend(batch)
+            
+            # If we got fewer than the batch size, we've reached the end
+            if len(batch) < batch_size:
+                break
+                
+            skip += batch_size
+            
+        status_text.empty() # Clear the status text
+            
+        if not all_records:
+            return None, true_balance, "No history found."
 
-        # Detection
+        df = pd.DataFrame(all_records)
+
+        # Detect Columns
         d_col = next((c for c in df.columns if 'time' in c or 'created' in c), 'created_at')
         a_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), 'amount')
         node_col = next((c for c in df.columns if 'node' in c.lower()), 'node_id')
         lic_col = next((c for c in df.columns if 'license' in c.lower()), 'license_id')
 
+        # Cleanup
         df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
         df['date_only'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
@@ -79,15 +99,19 @@ def sync_data(token):
         df['LIC_ID'] = df[lic_col].apply(format_id)
         
         return df, true_balance, None
-    except Exception as e: return None, 0, str(e)
+        
+    except Exception as e:
+        return None, 0, f"Engine Failure: {str(e)}"
 
-# --- MAIN ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>NODE_INTELLIGENCE</span></h1>", unsafe_allow_html=True)
+# --- MAIN RENDER ---
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>DEEP_INTELLIGENCE</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
     
     if df is not None:
+        st.sidebar.success(f"✅ Loaded {len(df)} total records")
+        
         today = datetime.now().date()
         yesterday_date = today - timedelta(days=1)
         seven_days_ago = today - timedelta(days=7)
@@ -105,39 +129,18 @@ if raw_input:
 
         # --- NODE PERFORMANCE LOG ---
         st.subheader("// NODE_PERFORMANCE_LOG")
-        
-        # Base grouping
-        node_stats = df.groupby('NODE_ID').agg({
-            'LIC_ID': 'nunique',
-            'usd_amount': 'sum'
-        }).reset_index().rename(columns={
-            'LIC_ID': 'In Use', 
-            'usd_amount': 'Total Earned ($)'
-        })
-        
-        # Calculate Availability (assuming 200 slots per node)
+        node_stats = df.groupby('NODE_ID').agg({'LIC_ID': 'nunique','usd_amount': 'sum'}).reset_index().rename(columns={'LIC_ID': 'In Use', 'usd_amount': 'Total'})
         node_stats['Available'] = 200 - node_stats['In Use']
         
-        # Calculate 7D Averages
         df_7d = df[df['date_only'] >= seven_days_ago]
-        node_7d = df_7d.groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Total'})
+        node_7d = df_7d.groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Sum'})
         node_stats = pd.merge(node_stats, node_7d, on='NODE_ID', how='left').fillna(0)
+        node_stats['Avg / Lic'] = node_stats['Total'] / node_stats['In Use']
+        node_stats['Avg Daily (7D)'] = node_stats['7D_Sum'] / 7
         
-        node_stats['Avg / Lic'] = node_stats['Total Earned ($)'] / node_stats['In Use']
-        node_stats['Avg Daily (7D)'] = node_stats['7D_Total'] / 7
-        
-        # Sort and display
-        st.dataframe(
-            node_stats.sort_values('Total Earned ($)', ascending=False).drop(columns=['7D_Total']),
-            column_config={
-                "Total Earned ($)": st.column_config.NumberColumn("TOTAL", format="$ %.4f"),
-                "Avg / Lic": st.column_config.NumberColumn("AVG / LIC", format="$ %.4f"),
-                "Avg Daily (7D)": st.column_config.NumberColumn("AVG DAILY (7D)", format="$ %.4f"),
-                "In Use": st.column_config.NumberColumn("IN USE", help="Licenses currently earning"),
-                "Available": st.column_config.NumberColumn("AVAILABLE", help="Empty slots (200 limit)")
-            },
-            hide_index=True, use_container_width=True
-        )
+        st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Sum']), 
+                     column_config={"Total": st.column_config.NumberColumn("TOTAL", format="$ %.4f"), "Avg / Lic": st.column_config.NumberColumn("AVG / LIC", format="$ %.4f"), "Avg Daily (7D)": st.column_config.NumberColumn("AVG DAILY (7D)", format="$ %.4f")},
+                     hide_index=True, use_container_width=True)
 
         st.markdown("---")
 
@@ -148,7 +151,6 @@ if raw_input:
         pivot_7d = df[df['date_only'].isin(date_list)].pivot_table(index='LIC_ID', columns='date_only', values='usd_amount', aggfunc='sum').fillna(0)
         pivot_7d.columns = [d.strftime('%Y-%m-%d') for d in pivot_7d.columns]
         matrix = pd.merge(lic_total, pivot_7d, left_index=True, right_index=True, how='left').fillna(0)
-        
         conf = {"TOTAL_USD": st.column_config.NumberColumn("LIFETIME TOTAL", format="$ %.4f")}
         for d in date_list:
             ds = d.strftime('%Y-%m-%d'); conf[ds] = st.column_config.NumberColumn(d.strftime('%b %d'), format="$ %.4f")
