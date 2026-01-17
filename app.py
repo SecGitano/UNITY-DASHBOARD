@@ -45,7 +45,6 @@ def parse_balance(data):
     except: return 0.0
 
 def process_daily_efficiency(group):
-    """Refines Peak and Avg by removing rewards > 5x daily mean."""
     rewards = group['usd_amount']
     if rewards.empty: return pd.Series({'refined_peak': 0.0, 'refined_avg': 0.0})
     initial_mean = rewards.mean()
@@ -63,10 +62,8 @@ def sync_data(token):
     clean_token = token.strip().replace('Bearer ', '')
     headers = {"apikey": API_KEY, "authorization": f"Bearer {clean_token}", "content-type": "application/json"}
     try:
-        # Balance
         r_bal = requests.post(API_URL_BAL, headers=headers, json={}, timeout=10)
         true_balance = parse_balance(r_bal.json()) / 1_000_000
-        # History Deep Sync
         all_records = []; skip = 0; batch_size = 1000 
         status_text = st.empty()
         while True:
@@ -80,13 +77,11 @@ def sync_data(token):
         status_text.empty()
         if not all_records: return None, true_balance, "No history found."
         df = pd.DataFrame(all_records)
-        # Column Identification
         d_col = next((c for c in df.columns if 'time' in c or 'created' in c), 'created_at')
         a_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), 'amount')
         node_col = next((c for c in df.columns if 'node' in c.lower()), 'node_id')
         lic_col = next((c for c in df.columns if 'license' in c.lower()), 'license_id')
         wall_col = next((c for c in df.columns if 'wallet' in c.lower() or 'address' in c.lower()), 'wallet')
-        # Formatting
         df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
         df['date_only'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
@@ -110,7 +105,7 @@ if raw_input:
         m2.metric("REWARDS LAST 7 DAYS", f"${r_7d:,.2f}")
         m3.metric("YESTERDAY'S REWARDS", f"${y_total:,.4f}")
 
-        # --- ROW 1: CHARTS ---
+        # --- CHARTS ---
         st.markdown("---")
         st.subheader("// CORE_VISUAL_ANALYTICS")
         c1, c2 = st.columns(2)
@@ -124,7 +119,6 @@ if raw_input:
             fig2 = px.bar(node_rew, x='NODE_ID', y='usd_amount', title="REWARDS PER NODE", template="plotly_dark", color='usd_amount', color_continuous_scale='Blues')
             st.plotly_chart(fig2, use_container_width=True)
 
-        # --- ROW 2: VOLUME & EFFICIENCY ---
         c3, c4 = st.columns(2)
         with c3:
             tx_vol = df.groupby('date_only').size().reset_index(name='tx_count')
@@ -148,7 +142,7 @@ if raw_input:
         node_stats = pd.merge(node_stats, node_7d, on='NODE_ID', how='left').fillna(0)
         node_stats['Avg / Lic'] = node_stats['Total'] / node_stats['In Use']
         node_stats['Avg Daily (7D)'] = node_stats['7D_Sum'] / 7
-        st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Total'] if '7D_Total' in node_stats else []), 
+        st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Sum']), 
                      column_config={"Total": st.column_config.NumberColumn(format="$ %.4f"), "Avg / Lic": st.column_config.NumberColumn(format="$ %.4f"), "Avg Daily (7D)": st.column_config.NumberColumn(format="$ %.4f")},
                      hide_index=True, use_container_width=True)
 
@@ -173,7 +167,7 @@ if raw_input:
         else: st.success("✅ LICENSE STABILITY: 100%")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- MATRIX ---
+        # --- THE LAST TABLE (MATRIX) ---
         st.markdown("---")
         st.subheader("// LICENSE_PERFORMANCE_MATRIX (7D)")
         date_list = [(today - timedelta(days=i)) for i in range(1, 8)]
