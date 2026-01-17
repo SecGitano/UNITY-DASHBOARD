@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # --- SYSTEM CONFIG ---
@@ -9,7 +10,7 @@ API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
-st.set_page_config(page_title="UNITY_CORE // DEEP_SYNC", layout="wide")
+st.set_page_config(page_title="UNITY_CORE // DEEP_ANALYTICS", layout="wide")
 
 # --- UI THEME ---
 st.markdown("""
@@ -18,6 +19,8 @@ st.markdown("""
     .stApp { background-color: #0d1117; font-family: 'JetBrains+Mono', monospace; }
     [data-testid="stMetric"] { background: #161b22; border: 1px solid #30363d; border-left: 5px solid #00f2ff; padding: 15px; }
     h1, h2, h3 { font-family: 'Orbitron', sans-serif; color: #f0f6fc; }
+    /* Tooltip styling */
+    .stTooltipIcon { color: #00f2ff !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -39,7 +42,7 @@ def parse_balance(data):
         return 0.0
     except: return 0.0
 
-# --- UPDATED DEEP SYNC FUNCTION ---
+# --- DEEP SYNC ENGINE ---
 def sync_data(token):
     clean_token = token.strip().replace('Bearer ', '')
     headers = {"apikey": API_KEY, "authorization": f"Bearer {clean_token}", "content-type": "application/json"}
@@ -49,47 +52,33 @@ def sync_data(token):
         r_bal = requests.post(API_URL_BAL, headers=headers, json={}, timeout=10)
         true_balance = parse_balance(r_bal.json()) / 1_000_000
 
-        # 2. Deep Fetch History (Pagination Loop)
+        # 2. Deep Fetch History
         all_records = []
         skip = 0
-        batch_size = 1000 # Standard limit
-        
-        # We use a placeholder to show progress
+        batch_size = 1000 
         status_text = st.empty()
         
         while True:
-            status_text.text(f"⏳ Synchronizing data... (Fetched {skip} records)")
+            status_text.text(f"⏳ Deep Sync in progress... (Fetched {skip} records)")
             payload = {"skip": skip, "take": batch_size}
-            
             r_his = requests.post(API_URL_HIS, headers=headers, json=payload, timeout=15)
             batch = r_his.json()
-            
-            # If we get an error or empty list, stop
-            if not isinstance(batch, list) or len(batch) == 0:
-                break
-                
+            if not isinstance(batch, list) or len(batch) == 0: break
             all_records.extend(batch)
-            
-            # If we got fewer than the batch size, we've reached the end
-            if len(batch) < batch_size:
-                break
-                
+            if len(batch) < batch_size: break
             skip += batch_size
             
-        status_text.empty() # Clear the status text
+        status_text.empty()
             
-        if not all_records:
-            return None, true_balance, "No history found."
-
+        if not all_records: return None, true_balance, "No history found."
         df = pd.DataFrame(all_records)
 
-        # Detect Columns
+        # Detect and Cleanup
         d_col = next((c for c in df.columns if 'time' in c or 'created' in c), 'created_at')
         a_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), 'amount')
         node_col = next((c for c in df.columns if 'node' in c.lower()), 'node_id')
         lic_col = next((c for c in df.columns if 'license' in c.lower()), 'license_id')
 
-        # Cleanup
         df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
         df['date_only'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
@@ -104,14 +93,13 @@ def sync_data(token):
         return None, 0, f"Engine Failure: {str(e)}"
 
 # --- MAIN RENDER ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>DEEP_INTELLIGENCE</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>DEEP_ANALYTICS</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
     
     if df is not None:
-        st.sidebar.success(f"✅ Loaded {len(df)} total records")
-        
+        # --- TOP METRICS ---
         today = datetime.now().date()
         yesterday_date = today - timedelta(days=1)
         seven_days_ago = today - timedelta(days=7)
@@ -119,11 +107,42 @@ if raw_input:
         rewards_7d = df[df['date_only'] >= seven_days_ago]['usd_amount'].sum()
         yesterday_total = df[df['date_only'] == yesterday_date]['usd_amount'].sum()
         
-        # --- METRICS ---
         m1, m2, m3 = st.columns(3)
         m1.metric("TOTAL BALANCE", f"${balance:,.2f}")
         m2.metric("REWARDS LAST 7 DAYS", f"${rewards_7d:,.2f}")
         m3.metric("YESTERDAY'S REWARDS", f"${yesterday_total:,.4f}")
+
+        st.markdown("---")
+
+        # --- NEW CHARTS SECTION ---
+        st.subheader("// VISUAL_REWARD_INTELLIGENCE")
+        c1, c2 = st.columns(2)
+
+        with c1:
+            # Chart 1: Rewards Accumulation Per Day
+            daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
+            daily_acc['cumulative'] = daily_acc['usd_amount'].cumsum()
+            
+            fig1 = px.area(daily_acc, x='date_only', y='usd_amount', 
+                          title="DAILY REWARD FLOW",
+                          labels={'usd_amount': 'USD ($)', 'date_only': 'Date'},
+                          template="plotly_dark")
+            fig1.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)')
+            fig1.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig1, use_container_width=True)
+
+        with c2:
+            # Chart 2: Total Rewards Per Node
+            node_rewards = df.groupby('NODE_ID')['usd_amount'].sum().sort_values(ascending=False).reset_index()
+            
+            fig2 = px.bar(node_rewards, x='NODE_ID', y='usd_amount',
+                         title="REWARDS PER NODE",
+                         labels={'usd_amount': 'Total USD ($)', 'NODE_ID': 'Node ID'},
+                         template="plotly_dark",
+                         color='usd_amount',
+                         color_continuous_scale='Blues')
+            fig2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False)
+            st.plotly_chart(fig2, use_container_width=True)
 
         st.markdown("---")
 
@@ -139,12 +158,16 @@ if raw_input:
         node_stats['Avg Daily (7D)'] = node_stats['7D_Sum'] / 7
         
         st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Sum']), 
-                     column_config={"Total": st.column_config.NumberColumn("TOTAL", format="$ %.4f"), "Avg / Lic": st.column_config.NumberColumn("AVG / LIC", format="$ %.4f"), "Avg Daily (7D)": st.column_config.NumberColumn("AVG DAILY (7D)", format="$ %.4f")},
+                     column_config={
+                         "Total": st.column_config.NumberColumn("TOTAL", format="$ %.4f"), 
+                         "Avg / Lic": st.column_config.NumberColumn("AVG / LIC", format="$ %.4f"), 
+                         "Avg Daily (7D)": st.column_config.NumberColumn("AVG DAILY (7D)", format="$ %.4f")
+                     },
                      hide_index=True, use_container_width=True)
 
         st.markdown("---")
 
-        # --- LICENSE MATRIX (7D) ---
+        # --- 7-DAY MATRIX ---
         st.subheader("// LICENSE_PERFORMANCE_MATRIX (7D)")
         date_list = [(today - timedelta(days=i)) for i in range(1, 8)]
         lic_total = df.groupby('LIC_ID')['usd_amount'].sum().rename('TOTAL_USD')
@@ -160,4 +183,4 @@ if raw_input:
     else:
         st.error(f"📡 SYNC FAILED: {err}")
 else:
-    st.info("👈 Authentication Required. Paste Bearer Token in sidebar.")
+    st.info("👈 Authentication Required. Paste Bearer Token in sidebar to initialize the Terminal.")
