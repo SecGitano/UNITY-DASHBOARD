@@ -40,6 +40,25 @@ def parse_balance(data):
         return 0.0
     except: return 0.0
 
+# --- SMART OUTLIER LOGIC ---
+def get_refined_peak(group):
+    """Returns the max reward, unless it is 5x higher than the mean, then returns the 2nd max."""
+    rewards = group['usd_amount']
+    if rewards.empty: return 0.0
+    
+    daily_mean = rewards.mean()
+    # Get top 2 unique values
+    top_vals = rewards.nlargest(2).tolist()
+    
+    if len(top_vals) == 0: return 0.0
+    max_val = top_vals[0]
+    
+    # If outlier detected (> 5x average) and a second value exists
+    if len(top_vals) > 1 and max_val > (daily_mean * 5):
+        return top_vals[1] # Return the 2nd highest
+    
+    return max_val # Return the highest
+
 # --- DEEP SYNC ENGINE ---
 def sync_data(token):
     clean_token = token.strip().replace('Bearer ', '')
@@ -68,7 +87,7 @@ def sync_data(token):
         df['date_only'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
         df['NODE_ID'] = df[node_col].apply(format_id)
-        df['LIC_ID_RAW'] = df[lic_col] # Raw for grouping
+        df['LIC_ID_RAW'] = df[lic_col]
         df['LIC_ID'] = df[lic_col].apply(format_id)
         return df, true_balance, None
     except Exception as e: return None, 0, str(e)
@@ -79,7 +98,6 @@ st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>ADVANCED_ANALYTICS<
 if raw_input:
     df, balance, err = sync_data(raw_input)
     if df is not None:
-        # Metrics
         today = datetime.now().date(); yest_d = today - timedelta(days=1); s_days = today - timedelta(days=7)
         r_7d = df[df['date_only'] >= s_days]['usd_amount'].sum()
         y_total = df[df['date_only'] == yest_d]['usd_amount'].sum()
@@ -92,7 +110,6 @@ if raw_input:
         st.markdown("---")
 
         # --- ROW 1: REWARD FLOW & NODES ---
-        st.subheader("// CORE_PERFORMANCE_HUD")
         c1, c2 = st.columns(2)
         with c1:
             daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
@@ -105,49 +122,44 @@ if raw_input:
             st.plotly_chart(fig2, use_container_width=True)
 
         # --- ROW 2: VOLUME & EFFICIENCY ---
-        st.subheader("// NETWORK_TRAFFIC_&_EFFICIENCY")
         c3, c4 = st.columns(2)
-        
         with c3:
-            # Transaction Volume Chart
             tx_vol = df.groupby('date_only').size().reset_index(name='tx_count')
             fig3 = px.bar(tx_vol, x='date_only', y='tx_count', title="TRANSACTIONS VOLUME", template="plotly_dark")
             fig3.update_traces(marker_color='#7000ff')
-            fig3.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', yaxis_title="TX Count")
             st.plotly_chart(fig3, use_container_width=True)
 
         with c4:
-            # Dual Line Chart: Highest Reward vs Avg per License
-            # Calculate daily stats
-            daily_stats = df.groupby('date_only').agg({
-                'usd_amount': ['max', 'sum'],
-                'LIC_ID_RAW': 'nunique'
-            })
-            daily_stats.columns = ['max_reward', 'total_reward', 'unique_lics']
-            daily_stats['avg_per_lic'] = daily_stats['total_reward'] / daily_stats['unique_lics']
-            daily_stats = daily_stats.reset_index()
+            # CALCULATE REFINED PEAK LOGIC
+            # Group by date and apply the 5x outlier filter
+            refined_peaks = df.groupby('date_only').apply(get_refined_peak).reset_index(name='peak_reward')
+            
+            # Calculate Average per License
+            avg_metrics = df.groupby('date_only').agg({'usd_amount': 'sum', 'LIC_ID_RAW': 'nunique'})
+            avg_metrics['avg_per_lic'] = avg_metrics['usd_amount'] / avg_metrics['LIC_ID_RAW']
+            avg_metrics = avg_metrics.reset_index()
+
+            # Merge for charting
+            eff_df = pd.merge(refined_peaks, avg_metrics, on='date_only')
 
             fig4 = go.Figure()
-            fig4.add_trace(go.Scatter(x=daily_stats['date_only'], y=daily_stats['max_reward'], name='Highest Reward', line=dict(color='#ff00ff', width=2)))
-            fig4.add_trace(go.Scatter(x=daily_stats['date_only'], y=daily_stats['avg_per_lic'], name='Avg per License', line=dict(color='#00f2ff', width=2, dash='dot')))
+            fig4.add_trace(go.Scatter(x=eff_df['date_only'], y=eff_df['peak_reward'], name='Refined Peak (Max or 2nd)', line=dict(color='#ff00ff', width=2)))
+            fig4.add_trace(go.Scatter(x=eff_df['date_only'], y=eff_df['avg_per_lic'], name='Avg per License', line=dict(color='#00f2ff', width=2, dash='dot')))
             
-            fig4.update_layout(title="PEAK REWARD VS AVG EFFICIENCY", template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            fig4.update_layout(title="PEAK REWARD (FILTERED) VS AVG EFFICIENCY", template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig4, use_container_width=True)
 
         st.markdown("---")
 
-        # --- TABLES ---
-        st.subheader("// NODE_PERFORMANCE_LOG")
+        # --- LOGS & MATRIX ---
         node_stats = df.groupby('NODE_ID').agg({'LIC_ID_RAW': 'nunique','usd_amount': 'sum'}).reset_index().rename(columns={'LIC_ID_RAW': 'In Use', 'usd_amount': 'Total'})
         node_stats['Available'] = 200 - node_stats['In Use']
-        df_7d = df[df['date_only'] >= s_days]
-        node_7d = df_7d.groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Sum'})
+        node_7d = df[df['date_only'] >= s_days].groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Sum'})
         node_stats = pd.merge(node_stats, node_7d, on='NODE_ID', how='left').fillna(0)
         node_stats['Avg / Lic'] = node_stats['Total'] / node_stats['In Use']
         node_stats['Avg Daily (7D)'] = node_stats['7D_Sum'] / 7
         st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Sum']), column_config={"Total": st.column_config.NumberColumn(format="$ %.4f"), "Avg / Lic": st.column_config.NumberColumn(format="$ %.4f"), "Avg Daily (7D)": st.column_config.NumberColumn(format="$ %.4f")}, hide_index=True, use_container_width=True)
 
-        st.subheader("// LICENSE_PERFORMANCE_MATRIX (7D)")
         d_list = [(today - timedelta(days=i)) for i in range(1, 8)]
         lic_tot = df.groupby('LIC_ID')['usd_amount'].sum().rename('TOTAL_USD')
         p_7d = df[df['date_only'].isin(d_list)].pivot_table(index='LIC_ID', columns='date_only', values='usd_amount', aggfunc='sum').fillna(0)
