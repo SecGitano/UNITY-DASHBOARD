@@ -26,7 +26,7 @@ st.markdown("""
 # --- SIDEBAR & AUTH ---
 st.sidebar.title("🔐 ACCESS CONTROL")
 with st.sidebar.expander("❓ HOW TO GET TOKEN"):
-    st.markdown("1. Login to Unity site.\n2. F12 > Network.\n3. Refresh page.\n4. Find `allocations`.\n5. Copy Authorization Bearer string.")
+    st.markdown("1. Login to Unity site.\n2. F12 > Network.\n3. Refresh page.\n4. Find `Reward get allocations`.\n5. Copy Authorization Bearer string (very long text).")
 raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
 
 # --- UTILITIES & PARSERS ---
