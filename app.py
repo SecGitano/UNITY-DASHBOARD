@@ -40,24 +40,31 @@ def parse_balance(data):
         return 0.0
     except: return 0.0
 
-# --- SMART OUTLIER LOGIC ---
-def get_refined_peak(group):
-    """Returns the max reward, unless it is 5x higher than the mean, then returns the 2nd max."""
+# --- ADVANCED DAILY CALCULATOR (REMOVES OUTLIERS FROM PEAK & AVG) ---
+def process_daily_efficiency(group):
+    """Refines both Peak and Average by removing rewards > 5x daily mean."""
     rewards = group['usd_amount']
-    if rewards.empty: return 0.0
+    if rewards.empty:
+        return pd.Series({'refined_peak': 0.0, 'refined_avg': 0.0})
     
-    daily_mean = rewards.mean()
-    # Get top 2 unique values
-    top_vals = rewards.nlargest(2).tolist()
+    # Calculate base stats for outlier detection
+    initial_mean = rewards.mean()
+    threshold = initial_mean * 5
+    unique_lic_count = group['LIC_ID_RAW'].nunique()
     
-    if len(top_vals) == 0: return 0.0
-    max_val = top_vals[0]
+    # 1. Refined Peak: Get max that isn't an outlier, or 2nd max if 1st is outlier
+    sorted_unique_vals = sorted(rewards.unique(), reverse=True)
+    max_val = sorted_unique_vals[0]
+    refined_peak = max_val
+    if len(sorted_unique_vals) > 1 and max_val > threshold:
+        refined_peak = sorted_unique_vals[1]
     
-    # If outlier detected (> 5x average) and a second value exists
-    if len(top_vals) > 1 and max_val > (daily_mean * 5):
-        return top_vals[1] # Return the 2nd highest
+    # 2. Refined Average: Remove all rewards > threshold from the calculation
+    filtered_rewards = rewards[rewards <= threshold]
+    # Sum only stable rewards and divide by total active licenses of that day
+    refined_avg = filtered_rewards.sum() / unique_lic_count if unique_lic_count > 0 else 0.0
     
-    return max_val # Return the highest
+    return pd.Series({'refined_peak': refined_peak, 'refined_avg': refined_avg})
 
 # --- DEEP SYNC ENGINE ---
 def sync_data(token):
@@ -69,7 +76,7 @@ def sync_data(token):
         all_records = []; skip = 0; batch_size = 1000 
         status_text = st.empty()
         while True:
-            status_text.text(f"⏳ Deep Sync in progress... ({skip} records)")
+            status_text.text(f"⏳ Deep Sync in progress... ({skip} records fetched)")
             r_his = requests.post(API_URL_HIS, headers=headers, json={"skip": skip, "take": batch_size}, timeout=15)
             batch = r_his.json()
             if not isinstance(batch, list) or len(batch) == 0: break
@@ -130,28 +137,25 @@ if raw_input:
             st.plotly_chart(fig3, use_container_width=True)
 
         with c4:
-            # CALCULATE REFINED PEAK LOGIC
-            # Group by date and apply the 5x outlier filter
-            refined_peaks = df.groupby('date_only').apply(get_refined_peak).reset_index(name='peak_reward')
-            
-            # Calculate Average per License
-            avg_metrics = df.groupby('date_only').agg({'usd_amount': 'sum', 'LIC_ID_RAW': 'nunique'})
-            avg_metrics['avg_per_lic'] = avg_metrics['usd_amount'] / avg_metrics['LIC_ID_RAW']
-            avg_metrics = avg_metrics.reset_index()
-
-            # Merge for charting
-            eff_df = pd.merge(refined_peaks, avg_metrics, on='date_only')
+            # APPLY THE REFINED EFFICIENCY LOGIC
+            efficiency_metrics = df.groupby('date_only').apply(process_daily_efficiency).reset_index()
 
             fig4 = go.Figure()
-            fig4.add_trace(go.Scatter(x=eff_df['date_only'], y=eff_df['peak_reward'], name='Refined Peak (Max or 2nd)', line=dict(color='#ff00ff', width=2)))
-            fig4.add_trace(go.Scatter(x=eff_df['date_only'], y=eff_df['avg_per_lic'], name='Avg per License', line=dict(color='#00f2ff', width=2, dash='dot')))
+            # Plot Refined Peak
+            fig4.add_trace(go.Scatter(x=efficiency_metrics['date_only'], y=efficiency_metrics['refined_peak'], 
+                                     name='Refined Peak (Luck Suppressed)', line=dict(color='#ff00ff', width=2)))
+            # Plot Refined Average
+            fig4.add_trace(go.Scatter(x=efficiency_metrics['date_only'], y=efficiency_metrics['refined_avg'], 
+                                     name='Refined Avg (Outliers Excluded)', line=dict(color='#00f2ff', width=2, dash='dot')))
             
-            fig4.update_layout(title="PEAK REWARD (FILTERED) VS AVG EFFICIENCY", template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            fig4.update_layout(title="CLEANED EFFICIENCY: PEAK VS AVG", template="plotly_dark", 
+                              plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', 
+                              legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig4, use_container_width=True)
 
         st.markdown("---")
 
-        # --- LOGS & MATRIX ---
+        # --- TABLES & MATRIX ---
         node_stats = df.groupby('NODE_ID').agg({'LIC_ID_RAW': 'nunique','usd_amount': 'sum'}).reset_index().rename(columns={'LIC_ID_RAW': 'In Use', 'usd_amount': 'Total'})
         node_stats['Available'] = 200 - node_stats['In Use']
         node_7d = df[df['date_only'] >= s_days].groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Sum'})
