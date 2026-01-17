@@ -91,7 +91,7 @@ def sync_data(token):
     except Exception as e: return None, 0, str(e)
 
 # --- MAIN ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>MASTER_TERMINAL</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
