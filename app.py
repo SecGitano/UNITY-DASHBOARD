@@ -38,7 +38,7 @@ st.markdown("""
     }
     .status-box:hover { transform: scale(1.1); z-index: 10; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
     
-    /* COLORS */
+    /* COLORS FOR HEARTBEAT */
     .status-green { background: rgba(0, 242, 70, 0.1); border: 1px solid #00f246; color: #00f246; box-shadow: inset 0 0 10px rgba(0, 242, 70, 0.2); }
     .status-yellow { background: rgba(255, 215, 0, 0.1); border: 1px solid #ffd700; color: #ffd700; box-shadow: inset 0 0 10px rgba(255, 215, 0, 0.2); }
     .status-red { background: rgba(255, 0, 60, 0.1); border: 1px solid #ff003c; color: #ff003c; box-shadow: inset 0 0 10px rgba(255, 0, 60, 0.2); }
@@ -133,7 +133,7 @@ if st.sidebar.button("🔄 FORCE REFRESH"):
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.4</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v5.0</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -153,7 +153,7 @@ if raw_input:
         m3.metric("YESTERDAY", f"${y_total:,.4f}")
         m4.metric("EST. MONTHLY", f"${avg_7d * 30:,.2f}", delta=f"${avg_7d:.2f}/day")
 
-        # --- 2. STATUS GRID (TRAFFIC LIGHT) ---
+        # --- 2. STATUS GRID (HEARTBEAT) ---
         st.markdown("---")
         st.subheader("// SYSTEM_STATUS_GRID (HEARTBEAT)")
         
@@ -185,13 +185,57 @@ if raw_input:
         st.markdown(html_grid, unsafe_allow_html=True)
         st.caption(f"🟢 ONLINE (<48h): {c_green} | 🟡 WARNING (48-96h): {c_yellow} | 🔴 OFFLINE (>96h): {c_red}")
 
-        # --- 3. CHARTS (DARK MODE) ---
+        # --- 3. PERFORMANCE HEATMAP (GRADIENT) ---
+        st.markdown("---")
+        st.subheader("// PERFORMANCE_HEATMAP (AVG DAILY REWARDS)")
+        
+        # Calculate stats
+        lic_stats = []
+        for lic in unique_lics:
+            subset = df[df['LIC_RAW'] == lic]
+            first_seen = subset['timestamp'].min()
+            days_active = max(1, (now - first_seen).days)
+            total = subset['usd_amount'].sum()
+            avg = total / days_active
+            lic_stats.append({'lic': lic, 'avg': avg})
+        
+        stats_df = pd.DataFrame(lic_stats)
+        min_avg = stats_df['avg'].min()
+        max_avg = stats_df['avg'].max()
+        
+        # Build Grid
+        html_heat = '<div class="status-grid">'
+        for i, row in stats_df.iterrows():
+            # Normalize avg to 0-1 range
+            if max_avg - min_avg == 0:
+                score = 1.0
+            else:
+                score = (row['avg'] - min_avg) / (max_avg - min_avg)
+            
+            # Map score to 0-9 bucket (10 grades)
+            grade = int(score * 9)
+            
+            # Map grade to Hue (0=Red, 120=Green)
+            # 10 steps: 0, 13, 26 ... 120
+            hue = grade * (120 / 9)
+            
+            # Dynamic CSS for the box
+            style = f"background: hsla({hue}, 100%, 50%, 0.15); border: 1px solid hsl({hue}, 100%, 50%); color: hsl({hue}, 100%, 75%); box-shadow: inset 0 0 10px hsla({hue}, 100%, 50%, 0.1);"
+            tooltip = f"ID: {format_id(row['lic'])} &#10;Avg: ${row['avg']:.4f}/day &#10;Grade: {grade+1}/10"
+            
+            html_heat += f'<div class="status-box" style="{style}" title="{tooltip}">#{i+1}</div>'
+        html_heat += '</div>'
+        
+        st.markdown(html_heat, unsafe_allow_html=True)
+        st.caption(f"🔴 LOWEST: ${min_avg:.4f}/day | 🟢 HIGHEST: ${max_avg:.4f}/day (10-Step Grading)")
+
+        # --- 4. CHARTS (DARK MODE) ---
         st.markdown("---")
         st.subheader("// VISUAL_ANALYTICS")
         
         c1, c2, c3 = st.columns(3)
         
-        # Chart 1: Total Volume (Area + Points)
+        # Chart 1: Total Volume
         with c1:
             daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
             daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7, min_periods=1).mean()
@@ -199,58 +243,44 @@ if raw_input:
             fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title="TOTAL DAILY VOLUME")
             fig1.add_trace(go.Scatter(
                 x=daily_acc['date_only'], y=daily_acc['MA7'], 
-                mode='lines', 
-                line=dict(color='white', dash='dot'),
-                showlegend=False # HIDDEN LABEL
+                mode='lines', line=dict(color='white', dash='dot'), showlegend=False
             ))
-            
             fig1.update_traces(
-                line_color='#00f2ff', 
-                fillcolor='rgba(0, 242, 255, 0.1)',
-                mode='lines+markers',
-                marker=dict(size=4),
-                selector=dict(type='area')
+                line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)',
+                mode='lines+markers', marker=dict(size=4), selector=dict(type='area')
             )
             fig1 = apply_dark_theme(fig1)
             st.plotly_chart(fig1, use_container_width=True)
             
-        # Chart 2: Node Distribution (Bar)
+        # Chart 2: Node Distribution
         with c2:
             node_rew = df.groupby('NODE_ID')['usd_amount'].sum().sort_values(ascending=False).reset_index()
             fig2 = px.bar(node_rew, x='NODE_ID', y='usd_amount', title="TOTAL BY NODE", color='usd_amount', color_continuous_scale='Blues')
             fig2 = apply_dark_theme(fig2)
             st.plotly_chart(fig2, use_container_width=True)
 
-        # Chart 3: Refined Average (Area + Points + Trend) - EXCL > $5
+        # Chart 3: Baseline Avg
         with c3:
             refined_df = df[df['usd_amount'] <= 5.0]
             if not refined_df.empty:
                 daily_avg = refined_df.groupby('date_only')['usd_amount'].mean().reset_index()
                 daily_avg['MA7'] = daily_avg['usd_amount'].rolling(window=7, min_periods=1).mean()
                 
-                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG") # SIMPLIFIED TITLE
-                
+                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG")
                 fig3.add_trace(go.Scatter(
                     x=daily_avg['date_only'], y=daily_avg['MA7'], 
-                    mode='lines', 
-                    line=dict(color='white', dash='dot'),
-                    showlegend=False # HIDDEN LABEL
+                    mode='lines', line=dict(color='white', dash='dot'), showlegend=False
                 ))
-                
                 fig3.update_traces(
-                    line_color='#d000ff', 
-                    fillcolor='rgba(208, 0, 255, 0.1)', 
-                    mode='lines+markers', 
-                    marker=dict(size=4),
-                    selector=dict(type='area')
+                    line_color='#d000ff', fillcolor='rgba(208, 0, 255, 0.1)',
+                    mode='lines+markers', marker=dict(size=4), selector=dict(type='area')
                 )
-                
                 fig3 = apply_dark_theme(fig3)
                 st.plotly_chart(fig3, use_container_width=True)
             else:
                 st.info("No data found under $5.00 threshold.")
 
-        # --- 4. DRILLDOWN ---
+        # --- 5. DRILLDOWN ---
         st.markdown("---")
         st.subheader("// LICENSE_INTELLIGENCE_DRILLDOWN")
         
@@ -276,7 +306,7 @@ if raw_input:
             else: st.success("✅ LICENSE STABILITY: 100%")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- 5. MATRIX ---
+        # --- 6. MATRIX ---
         st.markdown("---")
         st.subheader("// PERFORMANCE MATRIX (7D)")
         date_list = [(today - timedelta(days=i)) for i in range(1, 8)]
