@@ -10,23 +10,43 @@ API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
-st.set_page_config(page_title="UNITY_CORE // VAL's MASTER TERMINAL", layout="wide")
+st.set_page_config(page_title="UNITY_CORE // VAL's MASTER TERMINAL", layout="wide", page_icon="💠")
 
 # --- UI THEME ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono&display=swap');
     .stApp { background-color: #0d1117; font-family: 'JetBrains+Mono', monospace; }
-    [data-testid="stMetric"] { background: #161b22; border: 1px solid #30363d; border-left: 5px solid #00f2ff; padding: 15px; }
-    h1, h2, h3 { font-family: 'Orbitron', sans-serif; color: #f0f6fc; }
-    .drilldown-box { background: #11151c; border: 1px solid #00f2ff; padding: 25px; border-radius: 10px; margin: 20px 0; }
+    
+    /* Metrics */
+    [data-testid="stMetric"] { background: #161b22; border: 1px solid #30363d; border-left: 5px solid #00f2ff; padding: 15px; box-shadow: 0 0 10px rgba(0, 242, 255, 0.1); }
+    [data-testid="stMetricLabel"] { color: #8b949e; font-size: 0.8rem; }
+    [data-testid="stMetricValue"] { color: #f0f6fc; font-family: 'Orbitron', sans-serif; font-size: 1.8rem; }
+    
+    /* Headers */
+    h1, h2, h3 { font-family: 'Orbitron', sans-serif; color: #f0f6fc; text-transform: uppercase; letter-spacing: 2px; }
+    
+    /* Custom Boxes */
+    .drilldown-box { background: #11151c; border: 1px solid #00f2ff; padding: 25px; border-radius: 5px; margin: 20px 0; }
+    
+    /* STATUS GRID CSS */
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-top: 20px; margin-bottom: 20px; }
+    .status-box { 
+        padding: 15px; text-align: center; border-radius: 4px; 
+        font-family: 'Orbitron', sans-serif; font-weight: bold; font-size: 1.2em; 
+        cursor: help; transition: all 0.2s; position: relative;
+    }
+    .status-box:hover { transform: scale(1.1); z-index: 10; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
+    .status-green { background: rgba(0, 242, 70, 0.1); border: 1px solid #00f246; color: #00f246; box-shadow: inset 0 0 10px rgba(0, 242, 70, 0.2); }
+    .status-red { background: rgba(255, 0, 60, 0.1); border: 1px solid #ff003c; color: #ff003c; box-shadow: inset 0 0 10px rgba(255, 0, 60, 0.2); }
+    
     </style>
     """, unsafe_allow_html=True)
 
 # --- SIDEBAR & AUTH ---
 st.sidebar.title("🔐 ACCESS CONTROL")
 with st.sidebar.expander("❓ HOW TO GET TOKEN"):
-    st.markdown("1. Login to Unity site.\n2. F12 > Network.\n3. Refresh page.\n4. Find `Reward get allocations`.\n5. Copy Authorization Bearer string (very long text).")
+    st.markdown("1. Login to Unity site.\n2. F12 > Network.\n3. Refresh page.\n4. Find `Reward get allocations`.\n5. Copy Authorization Bearer string.")
 raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
 
 # --- UTILITIES & PARSERS ---
@@ -44,116 +64,133 @@ def parse_balance(data):
         return 0.0
     except: return 0.0
 
-def process_daily_efficiency(group):
-    rewards = group['usd_amount']
-    if rewards.empty: return pd.Series({'refined_peak': 0.0, 'refined_avg': 0.0})
-    initial_mean = rewards.mean()
-    threshold = initial_mean * 5
-    unique_lic_count = group['LIC_RAW'].nunique()
-    sorted_unique_vals = sorted(rewards.unique(), reverse=True)
-    max_val = sorted_unique_vals[0]
-    refined_peak = sorted_unique_vals[1] if len(sorted_unique_vals) > 1 and max_val > threshold else max_val
-    filtered_rewards = rewards[rewards <= threshold]
-    refined_avg = filtered_rewards.sum() / unique_lic_count if unique_lic_count > 0 else 0.0
-    return pd.Series({'refined_peak': refined_peak, 'refined_avg': refined_avg})
-
 # --- DATA ENGINE ---
+@st.cache_data(ttl=600, show_spinner=False)
 def sync_data(token):
     clean_token = token.strip().replace('Bearer ', '')
     headers = {"apikey": API_KEY, "authorization": f"Bearer {clean_token}", "content-type": "application/json"}
+    
     try:
         r_bal = requests.post(API_URL_BAL, headers=headers, json={}, timeout=10)
         true_balance = parse_balance(r_bal.json()) / 1_000_000
+    except: return None, 0, "Failed to fetch balance."
+
+    try:
         all_records = []; skip = 0; batch_size = 1000 
-        status_text = st.empty()
+        placeholder = st.empty()
         while True:
-            status_text.text(f"⏳ Synchronizing Core... ({skip} records)")
+            placeholder.text(f"⏳ DATA LINK ESTABLISHED... DOWNLOADING PACKET {skip}...")
             r_his = requests.post(API_URL_HIS, headers=headers, json={"skip": skip, "take": batch_size}, timeout=15)
+            if r_his.status_code != 200: break
             batch = r_his.json()
             if not isinstance(batch, list) or len(batch) == 0: break
             all_records.extend(batch)
             if len(batch) < batch_size: break
             skip += batch_size
-        status_text.empty()
+        placeholder.empty()
+        
         if not all_records: return None, true_balance, "No history found."
+        
         df = pd.DataFrame(all_records)
         d_col = next((c for c in df.columns if 'time' in c or 'created' in c), 'created_at')
         a_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), 'amount')
         node_col = next((c for c in df.columns if 'node' in c.lower()), 'node_id')
         lic_col = next((c for c in df.columns if 'license' in c.lower()), 'license_id')
         wall_col = next((c for c in df.columns if 'wallet' in c.lower() or 'address' in c.lower()), 'wallet')
+        
         df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
         df['date_only'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
-        df['NODE_RAW'] = df[node_col]; df['LIC_RAW'] = df[lic_col]; df['WALLET_RAW'] = df[wall_col] if wall_col in df.columns else "Unknown"
-        df['NODE_ID'] = df['NODE_RAW'].apply(format_id); df['LIC_ID'] = df['LIC_RAW'].apply(format_id)
+        df['NODE_RAW'] = df[node_col]
+        df['LIC_RAW'] = df[lic_col]
+        df['WALLET_RAW'] = df[wall_col] if wall_col in df.columns else "Unknown"
+        df['NODE_ID'] = df['NODE_RAW'].apply(format_id)
+        df['LIC_ID'] = df['LIC_RAW'].apply(format_id)
+        
         return df, true_balance, None
     except Exception as e: return None, 0, str(e)
 
 # --- MAIN ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v2.1</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
     if df is not None:
-        # --- METRICS ---
-        today = datetime.now().date(); yest_d = today - timedelta(days=1); s_days = today - timedelta(days=7)
+        
+        # --- HEADER METRICS ---
+        today = datetime.now().date()
+        yest_d = today - timedelta(days=1)
+        s_days = today - timedelta(days=7)
         r_7d = df[df['date_only'] >= s_days]['usd_amount'].sum()
         y_total = df[df['date_only'] == yest_d]['usd_amount'].sum()
-        m1, m2, m3 = st.columns(3)
+        
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("TOTAL BALANCE", f"${balance:,.2f}")
-        m2.metric("REWARDS LAST 7 DAYS", f"${r_7d:,.2f}")
-        m3.metric("YESTERDAY'S REWARDS", f"${y_total:,.4f}")
+        m2.metric("REWARDS (7D)", f"${r_7d:,.2f}")
+        m3.metric("YESTERDAY", f"${y_total:,.4f}")
+        avg_7d = r_7d / 7; proj_mo = avg_7d * 30
+        m4.metric("📅 EST. MONTHLY", f"${proj_mo:,.2f}", delta=f"${avg_7d:.2f}/day")
+
+        with st.sidebar:
+            st.markdown("---")
+            if st.button("🔄 FORCE REFRESH"):
+                st.cache_data.clear()
+                st.rerun()
+
+        # --- 🚨 STATUS GRID SYSTEM ---
+        st.markdown("---")
+        st.subheader("// SYSTEM_STATUS_GRID (48H HEARTBEAT)")
+        
+        # 1. Get unique licenses and sort them
+        unique_lics = sorted(df['LIC_RAW'].unique())
+        
+        # 2. Determine 48h cutoff
+        cutoff_time = datetime.now() - timedelta(hours=48)
+        
+        # 3. Find active licenses (ones with rewards > cutoff)
+        active_lics = set(df[df['timestamp'] >= cutoff_time]['LIC_RAW'].unique())
+        
+        # 4. Generate HTML Grid
+        html_grid = '<div class="status-grid">'
+        for i, lic in enumerate(unique_lics, 1):
+            status = "status-green" if lic in active_lics else "status-red"
+            # Tooltip shows the full ID
+            html_grid += f'<div class="status-box {status}" title="ID: {lic}">#{i}</div>'
+        html_grid += '</div>'
+        
+        st.markdown(html_grid, unsafe_allow_html=True)
+        
+        # Legend
+        count_active = len(active_lics)
+        count_total = len(unique_lics)
+        st.caption(f"🟢 ONLINE: {count_active} | 🔴 OFFLINE/WARNING: {count_total - count_active} | TOTAL NODES: {count_total}")
 
         # --- CHARTS ---
         st.markdown("---")
-        st.subheader("// CORE_VISUAL_ANALYTICS")
+        st.subheader("// VISUAL_ANALYTICS")
         c1, c2 = st.columns(2)
         with c1:
             daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
+            daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7).mean()
             fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title="DAILY REWARD FLOW", template="plotly_dark")
-            fig1.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)')
+            fig1.add_trace(go.Scatter(x=daily_acc['date_only'], y=daily_acc['MA7'], mode='lines', name='7-Day Trend', line=dict(color='white', dash='dot')))
+            fig1.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)', selector=dict(type='area'))
             st.plotly_chart(fig1, use_container_width=True)
         with c2:
             node_rew = df.groupby('NODE_ID')['usd_amount'].sum().sort_values(ascending=False).reset_index()
             fig2 = px.bar(node_rew, x='NODE_ID', y='usd_amount', title="REWARDS PER NODE", template="plotly_dark", color='usd_amount', color_continuous_scale='Blues')
             st.plotly_chart(fig2, use_container_width=True)
 
-        c3, c4 = st.columns(2)
-        with c3:
-            tx_vol = df.groupby('date_only').size().reset_index(name='tx_count')
-            fig3 = px.bar(tx_vol, x='date_only', y='tx_count', title="TRANSACTIONS VOLUME", template="plotly_dark")
-            fig3.update_traces(marker_color='#7000ff')
-            st.plotly_chart(fig3, use_container_width=True)
-        with c4:
-            eff_metrics = df.groupby('date_only').apply(process_daily_efficiency).reset_index()
-            fig4 = go.Figure()
-            fig4.add_trace(go.Scatter(x=eff_metrics['date_only'], y=eff_metrics['refined_peak'], name='Refined Peak', line=dict(color='#ff00ff', width=2)))
-            fig4.add_trace(go.Scatter(x=eff_metrics['date_only'], y=eff_metrics['refined_avg'], name='Refined Avg', line=dict(color='#00f2ff', width=2, dash='dot')))
-            fig4.update_layout(title="CLEANED EFFICIENCY", template="plotly_dark", legend=dict(orientation="h", y=1.1, x=1))
-            st.plotly_chart(fig4, use_container_width=True)
-
-        # --- NODE LOG ---
-        st.markdown("---")
-        st.subheader("// NODE_PERFORMANCE_LOG")
-        node_stats = df.groupby('NODE_ID').agg({'LIC_RAW': 'nunique','usd_amount': 'sum'}).reset_index().rename(columns={'LIC_RAW': 'In Use', 'usd_amount': 'Total'})
-        node_stats['Available'] = 200 - node_stats['In Use']
-        node_7d = df[df['date_only'] >= s_days].groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Sum'})
-        node_stats = pd.merge(node_stats, node_7d, on='NODE_ID', how='left').fillna(0)
-        node_stats['Avg / Lic'] = node_stats['Total'] / node_stats['In Use']
-        node_stats['Avg Daily (7D)'] = node_stats['7D_Sum'] / 7
-        st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Sum']), 
-                     column_config={"Total": st.column_config.NumberColumn(format="$ %.4f"), "Avg / Lic": st.column_config.NumberColumn(format="$ %.4f"), "Avg Daily (7D)": st.column_config.NumberColumn(format="$ %.4f")},
-                     hide_index=True, use_container_width=True)
-
         # --- DRILLDOWN ---
         st.markdown("---")
         st.subheader("// LICENSE_INTELLIGENCE_DRILLDOWN")
-        unique_lics = df['LIC_RAW'].unique().tolist()
-        lic_map = {format_id(l): l for l in unique_lics}
-        selected_display = st.selectbox("Inspect License Diagnostics:", options=list(lic_map.keys()))
-        selected_lic_raw = lic_map[selected_display]
+        # Map numbers back to IDs for the dropdown
+        lic_display_map = {f"#{i} - {format_id(l)}": l for i, l in enumerate(unique_lics, 1)}
+        
+        selected_display = st.selectbox("Inspect License Diagnostics:", options=list(lic_display_map.keys()))
+        selected_lic_raw = lic_display_map[selected_display]
         lic_df = df[df['LIC_RAW'] == selected_lic_raw].sort_values('timestamp')
+        
         st.markdown(f"<div class='drilldown-box'>### 🔍 DIAGNOSTICS: {selected_display}", unsafe_allow_html=True)
         d1, d2, d3 = st.columns(3)
         first_seen = lic_df['timestamp'].min(); days_act = (datetime.now() - first_seen).days
@@ -161,13 +198,15 @@ if raw_input:
         avg_d = lic_df['usd_amount'].sum() / (days_act if days_act > 0 else 1)
         d2.markdown(f"**AVG DAILY:** ${avg_d:,.4f}<br>**PEAK REWARD:** ${lic_df['usd_amount'].max():,.4f}", unsafe_allow_html=True)
         d3.markdown(f"**NODE ID:** {format_id(lic_df['NODE_RAW'].iloc[0])}<br>**WALLET:** {lic_df['WALLET_RAW'].iloc[0]}", unsafe_allow_html=True)
-        all_dates = pd.date_range(start=first_seen.date(), end=today); seen_dates = set(lic_df['date_only'].unique())
+        
+        all_dates = pd.date_range(start=first_seen.date(), end=today)
+        seen_dates = set(lic_df['date_only'].unique())
         outages = [d.date() for d in all_dates if d.date() not in seen_dates]
         if outages: st.warning(f"⚠️ OUTAGE ALERT: {len(outages)} days with zero rewards."); st.write(", ".join([d.strftime('%b %d') for d in outages]))
         else: st.success("✅ LICENSE STABILITY: 100%")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- THE LAST TABLE (MATRIX) ---
+        # --- MATRIX ---
         st.markdown("---")
         st.subheader("// LICENSE_PERFORMANCE_MATRIX (7D)")
         date_list = [(today - timedelta(days=i)) for i in range(1, 8)]
