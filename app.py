@@ -5,13 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-# --- TRY IMPORTING WALLET CONNECT ---
-try:
-    from wallet_connect import wallet_connect
-    WALLET_LIB_AVAILABLE = True
-except ImportError:
-    WALLET_LIB_AVAILABLE = False
-
 # --- SYSTEM CONFIG ---
 API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
@@ -50,12 +43,11 @@ st.markdown("""
     .status-green { background: rgba(0, 242, 70, 0.1); border: 1px solid #00f246; color: #00f246; box-shadow: inset 0 0 10px rgba(0, 242, 70, 0.2); }
     .status-yellow { background: rgba(255, 215, 0, 0.1); border: 1px solid #ffd700; color: #ffd700; box-shadow: inset 0 0 10px rgba(255, 215, 0, 0.2); }
     .status-red { background: rgba(255, 0, 60, 0.1); border: 1px solid #ff003c; color: #ff003c; box-shadow: inset 0 0 10px rgba(255, 0, 60, 0.2); }
-    .status-blue { background: rgba(0, 100, 255, 0.2); border: 1px solid #00f2ff; color: #00f2ff; box-shadow: 0 0 15px rgba(0, 242, 255, 0.3); } /* YOUR NODES */
-
+    .status-blue { background: rgba(0, 100, 255, 0.3); border: 1px solid #00f2ff; color: #00f2ff; box-shadow: 0 0 15px rgba(0, 242, 255, 0.5); } /* YOUR NODES */
     </style>
     """, unsafe_allow_html=True)
 
-# --- UTILITIES & PARSERS ---
+# --- UTILITIES ---
 def format_id(id_val):
     s = str(id_val)
     return f"{s[:4]}...{s[-4:]}" if len(s) > 10 else s
@@ -116,37 +108,29 @@ def sync_data(token):
         return df, true_balance, None
     except Exception as e: return None, 0, str(e)
 
-# --- SIDEBAR: AUTH & WALLET ---
+# --- SIDEBAR: AUTH & WATCHER ---
 st.sidebar.title("🔐 ACCESS CONTROL")
 with st.sidebar.expander("❓ HOW TO GET TOKEN"):
     st.markdown("1. Login to Unity site.\n2. F12 > Network.\n3. Refresh page.\n4. Find `Reward get allocations`.\n5. Copy Authorization Bearer string.")
 raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔗 WEB3 CONNECTION")
+st.sidebar.subheader("🕵️ WALLET WATCHER")
 
-user_wallet = None
+# Persistent Wallet Storage
+if 'user_wallet' not in st.session_state:
+    st.session_state.user_wallet = ""
 
-if WALLET_LIB_AVAILABLE:
-    # Use the library button
-    wallet_btn_key = "wallet_connect_btn"
-    connect_btn = wallet_connect(label="Connect Wallet", key=wallet_btn_key)
-    if connect_btn:
-        user_wallet = str(connect_btn).lower()
-        st.sidebar.success(f"✅ CONNECTED: {user_wallet[:6]}...{user_wallet[-4:]}")
-else:
-    # Fallback if library missing
-    st.sidebar.warning("⚠️ 'streamlit-wallet-connect' not detected.")
-    user_wallet_input = st.sidebar.text_input("Manual Wallet Address (Optional):")
-    if user_wallet_input:
-        user_wallet = user_wallet_input.strip().lower()
+wallet_in = st.sidebar.text_input("Paste Public Address (0x...):", value=st.session_state.user_wallet)
+if wallet_in:
+    st.session_state.user_wallet = wallet_in.strip().lower()
 
 if st.sidebar.button("🔄 FORCE REFRESH"):
     st.cache_data.clear()
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v3.0</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v3.1</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -155,26 +139,25 @@ if raw_input:
         # --- 1. IDENTIFY USER DATA ---
         my_df = pd.DataFrame()
         is_owner = False
+        user_wallet = st.session_state.user_wallet
         
         if user_wallet:
-            # Filter data for connected wallet
-            # Note: We convert column to lower for safe comparison
             my_df = df[df['WALLET_RAW'].astype(str).str.lower() == user_wallet]
             if not my_df.empty:
                 is_owner = True
-                st.markdown(f"<div class='wallet-box'>⚡ RECOGNIZED OWNER: <span style='color:#00f2ff'>{user_wallet}</span> | NODES: {my_df['LIC_RAW'].nunique()}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='wallet-box'>⚡ RECOGNIZED OWNER: <span style='color:#00f2ff'>{format_id(user_wallet)}</span> | NODES: {my_df['LIC_RAW'].nunique()}</div>", unsafe_allow_html=True)
             else:
-                st.warning(f"⚠️ Wallet connected ({format_id(user_wallet)}), but no matching records found in this dataset.")
+                st.warning(f"⚠️ Watching {format_id(user_wallet)}, but no matching nodes found in history.")
 
-        # --- 2. HEADER METRICS (Global vs Personal) ---
+        # --- 2. HEADER METRICS ---
         today = datetime.now().date()
         s_days = today - timedelta(days=7)
         
-        # Calculate Global Stats
+        # Global
         r_7d = df[df['date_only'] >= s_days]['usd_amount'].sum()
         y_total = df[df['date_only'] == (today - timedelta(days=1))]['usd_amount'].sum()
         
-        # Calculate Personal Stats (if wallet connected)
+        # Personal
         my_r7d = my_df[my_df['date_only'] >= s_days]['usd_amount'].sum() if is_owner else 0
         my_proj = (my_r7d / 7) * 30 if is_owner else 0
         
@@ -190,14 +173,12 @@ if raw_input:
             avg_7d = r_7d / 7
             m4.metric("EST. MONTHLY (GLOBAL)", f"${avg_7d * 30:,.2f}")
 
-        # --- 3. STATUS GRID (TRAFFIC LIGHT) ---
+        # --- 3. STATUS GRID (TRAFFIC LIGHT + BLUE OWNER) ---
         st.markdown("---")
         st.subheader("// SYSTEM_STATUS_GRID (HEARTBEAT)")
         
-        # If owner, we prioritize showing THEIR nodes first or highlighting them
         unique_lics = sorted(df['LIC_RAW'].unique())
         my_lics = set(my_df['LIC_RAW'].unique()) if is_owner else set()
-        
         last_seen_map = df.groupby('LIC_RAW')['timestamp'].max().to_dict()
         now = datetime.now()
         
@@ -208,11 +189,11 @@ if raw_input:
             last_ts = last_seen_map.get(lic)
             hours_since = (now - last_ts).total_seconds() / 3600
             
-            # Determine Color
             is_mine = lic in my_lics
             
+            # Logic: If it's mine, it turns BLUE (pulsing). 
+            # Otherwise standard Green/Yellow/Red
             if is_mine:
-                # Special Blue Pulse for User Nodes
                 status_class = "status-blue" 
                 c_blue += 1
             elif hours_since <= 48:
@@ -236,7 +217,7 @@ if raw_input:
             legend_text = f"🔵 YOUR NODES: {c_blue} | " + legend_text
         st.caption(legend_text)
 
-        # --- 4. CHARTS (Switchable) ---
+        # --- 4. CHARTS ---
         st.markdown("---")
         view_mode = "Global"
         if is_owner:
@@ -246,16 +227,16 @@ if raw_input:
         else:
             st.subheader("// VISUAL_ANALYTICS")
 
-        # Determine which DF to use for charts
         chart_df = my_df if view_mode == "My Farm" and is_owner else df
         
         if not chart_df.empty:
             c1, c2 = st.columns(2)
             with c1:
                 daily_acc = chart_df.groupby('date_only')['usd_amount'].sum().reset_index()
-                daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7).mean()
+                # If only 1 day of data, rolling mean might be NaN, so fill it
+                daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7, min_periods=1).mean()
                 fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title=f"{view_mode.upper()} REWARD FLOW", template="plotly_dark")
-                fig1.add_trace(go.Scatter(x=daily_acc['date_only'], y=daily_acc['MA7'], mode='lines', name='7-Day Trend', line=dict(color='white', dash='dot')))
+                fig1.add_trace(go.Scatter(x=daily_acc['date_only'], y=daily_acc['MA7'], mode='lines', name='Trend', line=dict(color='white', dash='dot')))
                 fig1.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)', selector=dict(type='area'))
                 st.plotly_chart(fig1, use_container_width=True)
             with c2:
@@ -269,8 +250,9 @@ if raw_input:
         st.markdown("---")
         st.subheader("// LICENSE_INTELLIGENCE_DRILLDOWN")
         
-        # Filter Dropdown based on view mode
+        # Only show relevant licenses in dropdown
         target_lics = sorted(chart_df['LIC_RAW'].unique())
+        # We need the global index so the #Number matches the grid
         lic_display_map = {f"#{unique_lics.index(l)+1} - {format_id(l)}": l for l in target_lics}
         
         if lic_display_map:
