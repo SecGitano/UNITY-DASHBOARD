@@ -133,7 +133,7 @@ if st.sidebar.button("🔄 FORCE REFRESH"):
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.0</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.1</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -189,22 +189,43 @@ if raw_input:
         st.markdown("---")
         st.subheader("// VISUAL_ANALYTICS")
         
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
+        
+        # Chart 1: Total Volume (Area)
         with c1:
             daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
             daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7, min_periods=1).mean()
             
-            fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title="DAILY REWARD FLOW")
+            fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title="TOTAL DAILY VOLUME")
             fig1.add_trace(go.Scatter(x=daily_acc['date_only'], y=daily_acc['MA7'], mode='lines', name='7-Day Trend', line=dict(color='white', dash='dot')))
             fig1.update_traces(line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)')
             fig1 = apply_dark_theme(fig1)
             st.plotly_chart(fig1, use_container_width=True)
             
+        # Chart 2: Node Distribution (Bar)
         with c2:
             node_rew = df.groupby('NODE_ID')['usd_amount'].sum().sort_values(ascending=False).reset_index()
-            fig2 = px.bar(node_rew, x='NODE_ID', y='usd_amount', title="REWARDS PER NODE", color='usd_amount', color_continuous_scale='Blues')
+            fig2 = px.bar(node_rew, x='NODE_ID', y='usd_amount', title="TOTAL BY NODE", color='usd_amount', color_continuous_scale='Blues')
             fig2 = apply_dark_theme(fig2)
             st.plotly_chart(fig2, use_container_width=True)
+
+        # Chart 3: Refined Average (Line - Excl Peaks)
+        with c3:
+            # Filter logic: only take rewards <= $5
+            refined_df = df[df['usd_amount'] <= 5.0]
+            if not refined_df.empty:
+                daily_avg = refined_df.groupby('date_only')['usd_amount'].mean().reset_index()
+                
+                fig3 = px.line(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG (EXCL. >$5)")
+                fig3.update_traces(line_color='#d000ff', line_width=3) # Magenta Neon
+                fig3.add_trace(go.Scatter(
+                    x=daily_avg['date_only'], y=daily_avg['usd_amount'],
+                    mode='markers', marker=dict(size=6, color='#d000ff'), showlegend=False
+                ))
+                fig3 = apply_dark_theme(fig3)
+                st.plotly_chart(fig3, use_container_width=True)
+            else:
+                st.info("No data found under $5.00 threshold.")
 
         # --- 4. DRILLDOWN ---
         st.markdown("---")
