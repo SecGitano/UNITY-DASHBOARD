@@ -72,7 +72,7 @@ def apply_dark_theme(fig):
         title_font_color="#f0f6fc",
         xaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d'),
         yaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d'),
-        legend=dict(bgcolor='rgba(0,0,0,0)', bordercolor='#30363d', itemclick=False, itemdoubleclick=False) # <--- TREND LINES LOCKED
+        legend=dict(bgcolor='rgba(0,0,0,0)', bordercolor='#30363d', itemclick=False, itemdoubleclick=False)
     )
     return fig
 
@@ -133,7 +133,7 @@ if st.sidebar.button("🔄 FORCE REFRESH"):
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.3</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.4</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -197,13 +197,17 @@ if raw_input:
             daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7, min_periods=1).mean()
             
             fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title="TOTAL DAILY VOLUME")
-            fig1.add_trace(go.Scatter(x=daily_acc['date_only'], y=daily_acc['MA7'], mode='lines', name='7-Day Trend', line=dict(color='white', dash='dot')))
+            fig1.add_trace(go.Scatter(
+                x=daily_acc['date_only'], y=daily_acc['MA7'], 
+                mode='lines', 
+                line=dict(color='white', dash='dot'),
+                showlegend=False # HIDDEN LABEL
+            ))
             
-            # Updated to match Chart 3 Style (Area + Markers)
             fig1.update_traces(
                 line_color='#00f2ff', 
                 fillcolor='rgba(0, 242, 255, 0.1)',
-                mode='lines+markers', # Added Markers
+                mode='lines+markers',
                 marker=dict(size=4),
                 selector=dict(type='area')
             )
@@ -222,19 +226,17 @@ if raw_input:
             refined_df = df[df['usd_amount'] <= 5.0]
             if not refined_df.empty:
                 daily_avg = refined_df.groupby('date_only')['usd_amount'].mean().reset_index()
-                # Rolling 7-day avg
                 daily_avg['MA7'] = daily_avg['usd_amount'].rolling(window=7, min_periods=1).mean()
                 
-                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG (EXCL. >$5)")
+                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG") # SIMPLIFIED TITLE
                 
-                # Add Trend Line
                 fig3.add_trace(go.Scatter(
                     x=daily_avg['date_only'], y=daily_avg['MA7'], 
-                    mode='lines', name='7-Day Trend', 
-                    line=dict(color='white', dash='dot')
+                    mode='lines', 
+                    line=dict(color='white', dash='dot'),
+                    showlegend=False # HIDDEN LABEL
                 ))
                 
-                # Style the Area (Neon Purple)
                 fig3.update_traces(
                     line_color='#d000ff', 
                     fillcolor='rgba(208, 0, 255, 0.1)', 
