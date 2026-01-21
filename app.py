@@ -33,11 +33,14 @@ st.markdown("""
     .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-top: 20px; margin-bottom: 20px; }
     .status-box { 
         padding: 15px; text-align: center; border-radius: 4px; 
-        font-family: 'Orbitron', sans-serif; font-weight: bold; font-size: 1.2em; 
+        font-family: 'Orbitron', sans-serif; font-weight: bold; font-size: 0.9em; 
         cursor: help; transition: all 0.2s; position: relative;
     }
     .status-box:hover { transform: scale(1.1); z-index: 10; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
+    
+    /* COLORS */
     .status-green { background: rgba(0, 242, 70, 0.1); border: 1px solid #00f246; color: #00f246; box-shadow: inset 0 0 10px rgba(0, 242, 70, 0.2); }
+    .status-yellow { background: rgba(255, 215, 0, 0.1); border: 1px solid #ffd700; color: #ffd700; box-shadow: inset 0 0 10px rgba(255, 215, 0, 0.2); }
     .status-red { background: rgba(255, 0, 60, 0.1); border: 1px solid #ff003c; color: #ff003c; box-shadow: inset 0 0 10px rgba(255, 0, 60, 0.2); }
     
     </style>
@@ -111,7 +114,7 @@ def sync_data(token):
     except Exception as e: return None, 0, str(e)
 
 # --- MAIN ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v2.1</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v2.2</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -137,33 +140,45 @@ if raw_input:
                 st.cache_data.clear()
                 st.rerun()
 
-        # --- 🚨 STATUS GRID SYSTEM ---
+        # --- 🚨 STATUS GRID SYSTEM (TRAFFIC LIGHT) ---
         st.markdown("---")
-        st.subheader("// SYSTEM_STATUS_GRID (48H HEARTBEAT)")
+        st.subheader("// SYSTEM_STATUS_GRID (HEARTBEAT)")
         
         # 1. Get unique licenses and sort them
         unique_lics = sorted(df['LIC_RAW'].unique())
         
-        # 2. Determine 48h cutoff
-        cutoff_time = datetime.now() - timedelta(hours=48)
+        # 2. Map every license to its MOST RECENT reward timestamp
+        last_seen_map = df.groupby('LIC_RAW')['timestamp'].max().to_dict()
+        now = datetime.now()
         
-        # 3. Find active licenses (ones with rewards > cutoff)
-        active_lics = set(df[df['timestamp'] >= cutoff_time]['LIC_RAW'].unique())
+        # 3. Counters for legend
+        c_green = 0; c_yellow = 0; c_red = 0
         
         # 4. Generate HTML Grid
         html_grid = '<div class="status-grid">'
         for i, lic in enumerate(unique_lics, 1):
-            status = "status-green" if lic in active_lics else "status-red"
-            # Tooltip shows the full ID
-            html_grid += f'<div class="status-box {status}" title="ID: {lic}">#{i}</div>'
+            last_ts = last_seen_map.get(lic)
+            hours_since = (now - last_ts).total_seconds() / 3600
+            
+            if hours_since <= 48:
+                status_class = "status-green"
+                c_green += 1
+            elif 48 < hours_since <= 96:
+                status_class = "status-yellow"
+                c_yellow += 1
+            else:
+                status_class = "status-red"
+                c_red += 1
+                
+            # Tooltip shows ID and hours since last reward
+            tooltip = f"ID: {lic} &#10;Last Reward: {int(hours_since)}h ago"
+            html_grid += f'<div class="status-box {status_class}" title="{tooltip}">#{i}</div>'
         html_grid += '</div>'
         
         st.markdown(html_grid, unsafe_allow_html=True)
         
         # Legend
-        count_active = len(active_lics)
-        count_total = len(unique_lics)
-        st.caption(f"🟢 ONLINE: {count_active} | 🔴 OFFLINE/WARNING: {count_total - count_active} | TOTAL NODES: {count_total}")
+        st.caption(f"🟢 ONLINE (<48h): {c_green} | 🟡 WARNING (48-96h): {c_yellow} | 🔴 OFFLINE (>96h): {c_red}")
 
         # --- CHARTS ---
         st.markdown("---")
