@@ -133,7 +133,7 @@ if st.sidebar.button("🔄 FORCE REFRESH"):
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v5.0</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v5.1</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -187,16 +187,23 @@ if raw_input:
 
         # --- 3. PERFORMANCE HEATMAP (GRADIENT) ---
         st.markdown("---")
-        st.subheader("// PERFORMANCE_HEATMAP (AVG DAILY REWARDS)")
+        st.subheader("// PERFORMANCE_HEATMAP (BASELINE AVG < $5)")
         
-        # Calculate stats
+        # Calculate stats with filter
         lic_stats = []
         for lic in unique_lics:
             subset = df[df['LIC_RAW'] == lic]
+            
+            # 1. Determine lifespan (Unfiltered)
             first_seen = subset['timestamp'].min()
             days_active = max(1, (now - first_seen).days)
-            total = subset['usd_amount'].sum()
-            avg = total / days_active
+            
+            # 2. Determine "Refined" Rewards (Filtered)
+            refined_subset = subset[subset['usd_amount'] <= 5.0]
+            total_refined = refined_subset['usd_amount'].sum()
+            
+            # 3. Calculate Average
+            avg = total_refined / days_active
             lic_stats.append({'lic': lic, 'avg': avg})
         
         stats_df = pd.DataFrame(lic_stats)
@@ -216,18 +223,17 @@ if raw_input:
             grade = int(score * 9)
             
             # Map grade to Hue (0=Red, 120=Green)
-            # 10 steps: 0, 13, 26 ... 120
             hue = grade * (120 / 9)
             
             # Dynamic CSS for the box
             style = f"background: hsla({hue}, 100%, 50%, 0.15); border: 1px solid hsl({hue}, 100%, 50%); color: hsl({hue}, 100%, 75%); box-shadow: inset 0 0 10px hsla({hue}, 100%, 50%, 0.1);"
-            tooltip = f"ID: {format_id(row['lic'])} &#10;Avg: ${row['avg']:.4f}/day &#10;Grade: {grade+1}/10"
+            tooltip = f"ID: {format_id(row['lic'])} &#10;Base Avg: ${row['avg']:.4f}/day &#10;Grade: {grade+1}/10"
             
             html_heat += f'<div class="status-box" style="{style}" title="{tooltip}">#{i+1}</div>'
         html_heat += '</div>'
         
         st.markdown(html_heat, unsafe_allow_html=True)
-        st.caption(f"🔴 LOWEST: ${min_avg:.4f}/day | 🟢 HIGHEST: ${max_avg:.4f}/day (10-Step Grading)")
+        st.caption(f"🔴 LOWEST: ${min_avg:.4f}/day | 🟢 HIGHEST: ${max_avg:.4f}/day (10-Step Grading, Excl. >$5 Peaks)")
 
         # --- 4. CHARTS (DARK MODE) ---
         st.markdown("---")
