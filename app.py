@@ -133,7 +133,7 @@ if st.sidebar.button("🔄 FORCE REFRESH"):
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.1</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v4.2</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -191,7 +191,7 @@ if raw_input:
         
         c1, c2, c3 = st.columns(3)
         
-        # Chart 1: Total Volume (Area)
+        # Chart 1: Total Volume (Area + Points)
         with c1:
             daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
             daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7, min_periods=1).mean()
@@ -209,19 +209,32 @@ if raw_input:
             fig2 = apply_dark_theme(fig2)
             st.plotly_chart(fig2, use_container_width=True)
 
-        # Chart 3: Refined Average (Line - Excl Peaks)
+        # Chart 3: Refined Average (Area + Points + Trend) - EXCL > $5
         with c3:
-            # Filter logic: only take rewards <= $5
             refined_df = df[df['usd_amount'] <= 5.0]
             if not refined_df.empty:
                 daily_avg = refined_df.groupby('date_only')['usd_amount'].mean().reset_index()
+                # Rolling 7-day avg for the trend line
+                daily_avg['MA7'] = daily_avg['usd_amount'].rolling(window=7, min_periods=1).mean()
                 
-                fig3 = px.line(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG (EXCL. >$5)")
-                fig3.update_traces(line_color='#d000ff', line_width=3) # Magenta Neon
+                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG (EXCL. >$5)")
+                
+                # Add Trend Line
                 fig3.add_trace(go.Scatter(
-                    x=daily_avg['date_only'], y=daily_avg['usd_amount'],
-                    mode='markers', marker=dict(size=6, color='#d000ff'), showlegend=False
+                    x=daily_avg['date_only'], y=daily_avg['MA7'], 
+                    mode='lines', name='7-Day Trend', 
+                    line=dict(color='white', dash='dot')
                 ))
+                
+                # Style the Area (Neon Purple) and enable points
+                fig3.update_traces(
+                    line_color='#d000ff', 
+                    fillcolor='rgba(208, 0, 255, 0.1)', 
+                    mode='lines+markers', # Adds points
+                    marker=dict(size=4),
+                    selector=dict(type='area')
+                )
+                
                 fig3 = apply_dark_theme(fig3)
                 st.plotly_chart(fig3, use_container_width=True)
             else:
