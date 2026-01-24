@@ -62,14 +62,10 @@ def parse_balance(data):
     except: return 0.0
 
 def apply_dark_theme(fig):
-    """Helper to enforce deep dark mode on charts"""
     fig.update_layout(
-        paper_bgcolor='#0d1117', # Matches App Background
-        plot_bgcolor='#0d1117',
-        font_family="JetBrains Mono",
-        font_color="#8b949e",
-        title_font_family="Orbitron",
-        title_font_color="#f0f6fc",
+        paper_bgcolor='#0d1117', plot_bgcolor='#0d1117',
+        font_family="JetBrains Mono", font_color="#8b949e",
+        title_font_family="Orbitron", title_font_color="#f0f6fc",
         xaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d'),
         yaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d'),
         legend=dict(bgcolor='rgba(0,0,0,0)', bordercolor='#30363d', itemclick=False, itemdoubleclick=False)
@@ -81,7 +77,6 @@ def apply_dark_theme(fig):
 def sync_data(token):
     clean_token = token.strip().replace('Bearer ', '')
     headers = {"apikey": API_KEY, "authorization": f"Bearer {clean_token}", "content-type": "application/json"}
-    
     try:
         r_bal = requests.post(API_URL_BAL, headers=headers, json={}, timeout=10)
         true_balance = parse_balance(r_bal.json()) / 1_000_000
@@ -113,19 +108,14 @@ def sync_data(token):
         df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
         df['date_only'] = df['timestamp'].dt.date
         df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
-        df['NODE_RAW'] = df[node_col]
-        df['LIC_RAW'] = df[lic_col]
-        df['WALLET_RAW'] = df[wall_col] if wall_col in df.columns else "Unknown"
-        df['NODE_ID'] = df['NODE_RAW'].apply(format_id)
-        df['LIC_ID'] = df['LIC_RAW'].apply(format_id)
+        df['NODE_RAW'] = df[node_col]; df['LIC_RAW'] = df[lic_col]; df['WALLET_RAW'] = df[wall_col] if wall_col in df.columns else "Unknown"
+        df['NODE_ID'] = df['NODE_RAW'].apply(format_id); df['LIC_ID'] = df['LIC_RAW'].apply(format_id)
         
         return df, true_balance, None
     except Exception as e: return None, 0, str(e)
 
 # --- SIDEBAR ---
 st.sidebar.title("🔐 ACCESS CONTROL")
-with st.sidebar.expander("❓ HOW TO GET TOKEN"):
-    st.markdown("1. Login to Unity site.\n2. F12 > Network.\n3. Refresh page.\n4. Find `Reward get allocations`.\n5. Copy Authorization Bearer string.")
 raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
 
 if st.sidebar.button("🔄 FORCE REFRESH"):
@@ -133,7 +123,7 @@ if st.sidebar.button("🔄 FORCE REFRESH"):
     st.rerun()
 
 # --- MAIN APP ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v5.1</span></h1>", unsafe_allow_html=True)
+st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>VAL's MASTER TERMINAL v5.4</span></h1>", unsafe_allow_html=True)
 
 if raw_input:
     df, balance, err = sync_data(raw_input)
@@ -142,7 +132,6 @@ if raw_input:
         # --- 1. HEADER METRICS ---
         today = datetime.now().date()
         s_days = today - timedelta(days=7)
-        
         r_7d = df[df['date_only'] >= s_days]['usd_amount'].sum()
         y_total = df[df['date_only'] == (today - timedelta(days=1))]['usd_amount'].sum()
         avg_7d = r_7d / 7
@@ -156,161 +145,81 @@ if raw_input:
         # --- 2. STATUS GRID (HEARTBEAT) ---
         st.markdown("---")
         st.subheader("// SYSTEM_STATUS_GRID (HEARTBEAT)")
-        
         unique_lics = sorted(df['LIC_RAW'].unique())
         last_seen_map = df.groupby('LIC_RAW')['timestamp'].max().to_dict()
         now = datetime.now()
         
-        c_green, c_yellow, c_red = 0, 0, 0
-        
         html_grid = '<div class="status-grid">'
         for i, lic in enumerate(unique_lics, 1):
-            last_ts = last_seen_map.get(lic)
-            hours_since = (now - last_ts).total_seconds() / 3600
-            
-            if hours_since <= 48:
-                status_class = "status-green"
-                c_green += 1
-            elif 48 < hours_since <= 96:
-                status_class = "status-yellow"
-                c_yellow += 1
-            else:
-                status_class = "status-red"
-                c_red += 1
-                
+            hours_since = (now - last_seen_map.get(lic)).total_seconds() / 3600
+            status_class = "status-green" if hours_since <= 48 else "status-yellow" if hours_since <= 96 else "status-red"
             tooltip = f"ID: {lic} &#10;Last Reward: {int(hours_since)}h ago"
             html_grid += f'<div class="status-box {status_class}" title="{tooltip}">#{i}</div>'
         html_grid += '</div>'
-        
         st.markdown(html_grid, unsafe_allow_html=True)
-        st.caption(f"🟢 ONLINE (<48h): {c_green} | 🟡 WARNING (48-96h): {c_yellow} | 🔴 OFFLINE (>96h): {c_red}")
 
-        # --- 3. PERFORMANCE HEATMAP (GRADIENT) ---
+        # --- 3. PERFORMANCE HEATMAP (BASELINE: $0.015 - $5.00) ---
         st.markdown("---")
-        st.subheader("// PERFORMANCE_HEATMAP (BASELINE AVG < $5)")
+        st.subheader("// PERFORMANCE_HEATMAP (BASELINE AVG: $0.015 - $5)")
         
-        # Calculate stats with filter
         lic_stats = []
         for lic in unique_lics:
             subset = df[df['LIC_RAW'] == lic]
-            
-            # 1. Determine lifespan (Unfiltered)
             first_seen = subset['timestamp'].min()
             days_active = max(1, (now - first_seen).days)
-            
-            # 2. Determine "Refined" Rewards (Filtered)
-            refined_subset = subset[subset['usd_amount'] <= 5.0]
-            total_refined = refined_subset['usd_amount'].sum()
-            
-            # 3. Calculate Average
-            avg = total_refined / days_active
+            # DUST FILTER APPLIED HERE: >= 0.015 and <= 5.0
+            refined_subset = subset[(subset['usd_amount'] <= 5.0) & (subset['usd_amount'] >= 0.015)]
+            avg = refined_subset['usd_amount'].sum() / days_active
             lic_stats.append({'lic': lic, 'avg': avg})
         
         stats_df = pd.DataFrame(lic_stats)
-        min_avg = stats_df['avg'].min()
-        max_avg = stats_df['avg'].max()
+        min_avg, max_avg = stats_df['avg'].min(), stats_df['avg'].max()
         
-        # Build Grid
         html_heat = '<div class="status-grid">'
         for i, row in stats_df.iterrows():
-            # Normalize avg to 0-1 range
-            if max_avg - min_avg == 0:
-                score = 1.0
-            else:
-                score = (row['avg'] - min_avg) / (max_avg - min_avg)
-            
-            # Map score to 0-9 bucket (10 grades)
-            grade = int(score * 9)
-            
-            # Map grade to Hue (0=Red, 120=Green)
-            hue = grade * (120 / 9)
-            
-            # Dynamic CSS for the box
-            style = f"background: hsla({hue}, 100%, 50%, 0.15); border: 1px solid hsl({hue}, 100%, 50%); color: hsl({hue}, 100%, 75%); box-shadow: inset 0 0 10px hsla({hue}, 100%, 50%, 0.1);"
-            tooltip = f"ID: {format_id(row['lic'])} &#10;Base Avg: ${row['avg']:.4f}/day &#10;Grade: {grade+1}/10"
-            
+            score = 1.0 if max_avg == min_avg else (row['avg'] - min_avg) / (max_avg - min_avg)
+            hue = int(score * 9) * (120 / 9)
+            style = f"background: hsla({hue}, 100%, 50%, 0.15); border: 1px solid hsl({hue}, 100%, 50%); color: hsl({hue}, 100%, 75%);"
+            tooltip = f"ID: {format_id(row['lic'])} &#10;Baseline Avg: ${row['avg']:.4f}/day"
             html_heat += f'<div class="status-box" style="{style}" title="{tooltip}">#{i+1}</div>'
         html_heat += '</div>'
-        
         st.markdown(html_heat, unsafe_allow_html=True)
-        st.caption(f"🔴 LOWEST: ${min_avg:.4f}/day | 🟢 HIGHEST: ${max_avg:.4f}/day (10-Step Grading, Excl. >$5 Peaks)")
 
-        # --- 4. CHARTS (DARK MODE) ---
+        # --- 4. CHARTS ---
         st.markdown("---")
         st.subheader("// VISUAL_ANALYTICS")
-        
         c1, c2, c3 = st.columns(3)
-        
-        # Chart 1: Total Volume
         with c1:
             daily_acc = df.groupby('date_only')['usd_amount'].sum().reset_index()
-            daily_acc['MA7'] = daily_acc['usd_amount'].rolling(window=7, min_periods=1).mean()
-            
-            fig1 = px.area(daily_acc, x='date_only', y='usd_amount', title="TOTAL DAILY VOLUME")
-            fig1.add_trace(go.Scatter(
-                x=daily_acc['date_only'], y=daily_acc['MA7'], 
-                mode='lines', line=dict(color='white', dash='dot'), showlegend=False
-            ))
-            fig1.update_traces(
-                line_color='#00f2ff', fillcolor='rgba(0, 242, 255, 0.1)',
-                mode='lines+markers', marker=dict(size=4), selector=dict(type='area')
-            )
-            fig1 = apply_dark_theme(fig1)
-            st.plotly_chart(fig1, use_container_width=True)
-            
-        # Chart 2: Node Distribution
+            st.plotly_chart(apply_dark_theme(px.area(daily_acc, x='date_only', y='usd_amount', title="TOTAL DAILY VOLUME")), use_container_width=True)
         with c2:
             node_rew = df.groupby('NODE_ID')['usd_amount'].sum().sort_values(ascending=False).reset_index()
-            fig2 = px.bar(node_rew, x='NODE_ID', y='usd_amount', title="TOTAL BY NODE", color='usd_amount', color_continuous_scale='Blues')
-            fig2 = apply_dark_theme(fig2)
-            st.plotly_chart(fig2, use_container_width=True)
-
-        # Chart 3: Baseline Avg
+            st.plotly_chart(apply_dark_theme(px.bar(node_rew, x='NODE_ID', y='usd_amount', title="TOTAL BY NODE", color='usd_amount', color_continuous_scale='Blues')), use_container_width=True)
         with c3:
-            refined_df = df[df['usd_amount'] <= 5.0]
+            # DUST FILTER APPLIED TO CHART: >= 0.015 and <= 5.0
+            refined_df = df[(df['usd_amount'] <= 5.0) & (df['usd_amount'] >= 0.015)]
             if not refined_df.empty:
                 daily_avg = refined_df.groupby('date_only')['usd_amount'].mean().reset_index()
-                daily_avg['MA7'] = daily_avg['usd_amount'].rolling(window=7, min_periods=1).mean()
-                
-                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG")
-                fig3.add_trace(go.Scatter(
-                    x=daily_avg['date_only'], y=daily_avg['MA7'], 
-                    mode='lines', line=dict(color='white', dash='dot'), showlegend=False
-                ))
-                fig3.update_traces(
-                    line_color='#d000ff', fillcolor='rgba(208, 0, 255, 0.1)',
-                    mode='lines+markers', marker=dict(size=4), selector=dict(type='area')
-                )
-                fig3 = apply_dark_theme(fig3)
-                st.plotly_chart(fig3, use_container_width=True)
-            else:
-                st.info("No data found under $5.00 threshold.")
+                fig3 = px.area(daily_avg, x='date_only', y='usd_amount', title="BASELINE AVG ($0.015 - $5)")
+                fig3.update_traces(line_color='#d000ff', fillcolor='rgba(208, 0, 255, 0.1)')
+                st.plotly_chart(apply_dark_theme(fig3), use_container_width=True)
 
         # --- 5. DRILLDOWN ---
         st.markdown("---")
         st.subheader("// LICENSE_INTELLIGENCE_DRILLDOWN")
-        
         lic_display_map = {f"#{unique_lics.index(l)+1} - {format_id(l)}": l for l in unique_lics}
+        selected_display = st.selectbox("Inspect License:", options=list(lic_display_map.keys()))
+        selected_lic_raw = lic_display_map[selected_display]
+        lic_df = df[df['LIC_RAW'] == selected_lic_raw].sort_values('timestamp')
         
-        if lic_display_map:
-            selected_display = st.selectbox("Inspect License Diagnostics:", options=list(lic_display_map.keys()))
-            selected_lic_raw = lic_display_map[selected_display]
-            lic_df = df[df['LIC_RAW'] == selected_lic_raw].sort_values('timestamp')
-            
-            st.markdown(f"<div class='drilldown-box'>### 🔍 DIAGNOSTICS: {selected_display}", unsafe_allow_html=True)
-            d1, d2, d3 = st.columns(3)
-            first_seen = lic_df['timestamp'].min(); days_act = (datetime.now() - first_seen).days
-            d1.markdown(f"**ONLINE SINCE:**<br>{first_seen.strftime('%Y-%m-%d')}<br>({days_act} days active)", unsafe_allow_html=True)
-            avg_d = lic_df['usd_amount'].sum() / (days_act if days_act > 0 else 1)
-            d2.markdown(f"**AVG DAILY:** ${avg_d:,.4f}<br>**PEAK REWARD:** ${lic_df['usd_amount'].max():,.4f}", unsafe_allow_html=True)
-            d3.markdown(f"**NODE ID:** {format_id(lic_df['NODE_RAW'].iloc[0])}<br>**WALLET:** {lic_df['WALLET_RAW'].iloc[0]}", unsafe_allow_html=True)
-            
-            all_dates = pd.date_range(start=first_seen.date(), end=today)
-            seen_dates = set(lic_df['date_only'].unique())
-            outages = [d.date() for d in all_dates if d.date() not in seen_dates]
-            if outages: st.warning(f"⚠️ OUTAGE ALERT: {len(outages)} days with zero rewards."); st.write(", ".join([d.strftime('%b %d') for d in outages]))
-            else: st.success("✅ LICENSE STABILITY: 100%")
-            st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='drilldown-box'>### 🔍 DIAGNOSTICS: {selected_display}", unsafe_allow_html=True)
+        d1, d2, d3 = st.columns(3)
+        first_seen = lic_df['timestamp'].min(); days_act = (datetime.now() - first_seen).days
+        d1.markdown(f"**ONLINE SINCE:**<br>{first_seen.strftime('%Y-%m-%d')}<br>({days_act} days active)", unsafe_allow_html=True)
+        avg_d = lic_df['usd_amount'].sum() / (days_act if days_act > 0 else 1)
+        d2.markdown(f"**AVG DAILY:** ${avg_d:,.4f}<br>**PEAK:** ${lic_df['usd_amount'].max():,.4f}", unsafe_allow_html=True)
+        d3.markdown(f"**NODE ID:** {format_id(lic_df['NODE_RAW'].iloc[0])}<br>**WALLET:** {lic_df['WALLET_RAW'].iloc[0]}", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # --- 6. MATRIX ---
         st.markdown("---")
