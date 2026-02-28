@@ -10,40 +10,55 @@ API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
-st.set_page_config(page_title="UNITY_CORE // COMMAND CENTER", layout="wide", page_icon="💠")
+st.set_page_config(page_title="Unity Analytics // Hando Core", layout="wide", page_icon="📊")
 
-# --- 2. CYBER-INDUSTRIAL UI THEME ---
+# --- 2. HANDO MODERN SAAS UI THEME ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono&display=swap');
-    .stApp { background-color: #0d1117; font-family: 'JetBrains+Mono', monospace; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
-    /* KPI Metrics */
+    /* Global Styles */
+    .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
+    h1, h2, h3 { color: #1e293b; font-weight: 700 !important; letter-spacing: -0.5px; }
+    .stMarkdown { color: #64748b; }
+
+    /* Sidebar Styling (Hando Navy) */
+    [data-testid="stSidebar"] { background-color: #1e293b !important; border-right: 1px solid #e2e8f0; }
+    [data-testid="stSidebar"] * { color: #ffffff !important; }
+    [data-testid="stSidebar"] .stButton button { 
+        background-color: #4f46e5 !important; border: none; color: white !important; border-radius: 8px;
+    }
+
+    /* KPI Metrics Card Styling */
     [data-testid="stMetric"] { 
-        background: #161b22; border: 1px solid #30363d; border-left: 5px solid #00f2ff; 
-        padding: 15px; box-shadow: 0 0 15px rgba(0, 242, 255, 0.05); 
+        background: #ffffff; border: 1px solid #e2e8f0; 
+        padding: 20px !important; border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
-    [data-testid="stMetricLabel"] { color: #8b949e; font-size: 0.85rem; text-transform: uppercase; }
-    [data-testid="stMetricValue"] { color: #f0f6fc; font-family: 'Orbitron', sans-serif; }
-    
-    /* Typography */
-    h1, h2, h3 { font-family: 'Orbitron', sans-serif; color: #f0f6fc; text-transform: uppercase; letter-spacing: 2px; }
-    .stMarkdown { color: #8b949e; }
-    
-    /* Component Styling */
-    .drilldown-box { background: #11151c; border: 1px solid #00f2ff; padding: 25px; border-radius: 4px; margin: 20px 0; }
-    .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(65px, 1fr)); gap: 8px; margin: 15px 0; }
+    [data-testid="stMetricLabel"] { color: #64748b; font-weight: 500; font-size: 0.85rem; }
+    [data-testid="stMetricValue"] { color: #1e293b; font-weight: 700; }
+
+    /* Custom Card Container */
+    .hando-card {
+        background: white; border: 1px solid #e2e8f0; padding: 24px;
+        border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+
+    /* Status Grid */
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(45px, 1fr)); gap: 8px; margin: 15px 0; }
     .status-box { 
-        padding: 12px 5px; text-align: center; border-radius: 3px; 
-        font-family: 'Orbitron', sans-serif; font-weight: bold; font-size: 0.8em; 
-        cursor: help; transition: 0.2s;
+        padding: 10px 0; text-align: center; border-radius: 6px; 
+        font-weight: 600; font-size: 0.75em; transition: 0.3s;
     }
-    .status-box:hover { transform: scale(1.1); z-index: 5; box-shadow: 0 0 10px rgba(0,242,255,0.3); }
     
-    /* Heartbeat Colors */
-    .bg-green { background: rgba(0, 242, 70, 0.1); border: 1px solid #00f246; color: #00f246; }
-    .bg-yellow { background: rgba(255, 215, 0, 0.1); border: 1px solid #ffd700; color: #ffd700; }
-    .bg-red { background: rgba(255, 0, 60, 0.1); border: 1px solid #ff003c; color: #ff003c; }
+    /* Hando Badge Colors */
+    .bg-green { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+    .bg-yellow { background: #fef9c3; color: #a16207; border: 1px solid #fef08a; }
+    .bg-red { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+
+    /* Table & Dataframe */
+    .stDataFrame { border: 1px solid #e2e8f0; border-radius: 12px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -65,30 +80,28 @@ def parse_balance(data):
 def apply_chart_style(fig):
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font_family="JetBrains Mono", font_color="#8b949e",
-        title_font_family="Orbitron", title_font_color="#f0f6fc",
-        xaxis=dict(showgrid=True, gridcolor='#21262d'),
-        yaxis=dict(showgrid=True, gridcolor='#21262d'),
-        legend=dict(bgcolor='rgba(0,0,0,0)', bordercolor='#30363d')
+        font_family="Inter", font_color="#64748b",
+        title_font_size=18, title_font_color="#1e293b",
+        xaxis=dict(showgrid=True, gridcolor='#f1f5f9'),
+        yaxis=dict(showgrid=True, gridcolor='#f1f5f9'),
+        margin=dict(t=40, b=0, l=0, r=0)
     )
+    fig.update_traces(marker_line_width=0)
     return fig
 
-# --- 4. DATA ENGINE (DEEP SYNC) ---
+# --- 4. DATA ENGINE ---
 @st.cache_data(ttl=600, show_spinner=False)
 def deep_sync(token):
     clean_token = token.strip().replace('Bearer ', '')
     headers = {"apikey": API_KEY, "authorization": f"Bearer {clean_token}", "content-type": "application/json"}
-    
     try:
-        # Fetch Balance
         r_bal = requests.post(API_URL_BAL, headers=headers, json={}, timeout=10)
         true_balance = parse_balance(r_bal.json()) / 1_000_000
         
-        # Paginated History Fetch
         all_recs = []; skip = 0; batch = 1000
         sync_status = st.empty()
         while True:
-            sync_status.text(f"⏳ LINKING CORE... SYNCING PACKET {skip}...")
+            sync_status.info(f"Connecting to node registry... (Packet {skip})")
             r_his = requests.post(API_URL_HIS, headers=headers, json={"skip": skip, "take": batch}, timeout=15)
             if r_his.status_code != 200: break
             data = r_his.json()
@@ -98,154 +111,130 @@ def deep_sync(token):
             skip += batch
         sync_status.empty()
         
-        if not all_recs: return None, true_balance, "History stream empty."
+        if not all_recs: return None, true_balance, "History empty."
         
         df = pd.DataFrame(all_recs)
-        d_col = next((c for c in df.columns if 'time' in c or 'created' in c), 'created_at')
-        a_col = next((c for c in df.columns if 'amount' in c or 'reward' in c), 'amount')
-        node_col = next((c for c in df.columns if 'node' in c.lower()), 'node_id')
-        lic_col = next((c for c in df.columns if 'license' in c.lower()), 'license_id')
-        wall_col = next((c for c in df.columns if 'wallet' in c.lower() or 'address' in c.lower()), 'wallet')
-        
-        df['timestamp'] = pd.to_datetime(df[d_col], utc=True).dt.tz_localize(None)
+        df['timestamp'] = pd.to_datetime(df['created_at'], utc=True).dt.tz_localize(None)
         df['date_only'] = df['timestamp'].dt.date
-        df['usd_amount'] = pd.to_numeric(df[a_col]) / 1_000_000
-        df['NODE_RAW'] = df[node_col]; df['LIC_RAW'] = df[lic_col]
-        df['WALLET_RAW'] = df[wall_col] if wall_col in df.columns else "Unknown"
-        df['NODE_ID'] = df['NODE_RAW'].apply(format_id); df['LIC_ID'] = df['LIC_RAW'].apply(format_id)
+        df['usd_amount'] = pd.to_numeric(df['amount']) / 1_000_000
+        df['NODE_ID'] = df['node_id'].apply(format_id)
+        df['LIC_RAW'] = df['license_id']
         
         return df, true_balance, None
     except Exception as e: return None, 0, str(e)
 
 # --- 5. SIDEBAR ---
-st.sidebar.title("🔐 ACCESS CONTROL")
-with st.sidebar.expander("❓ TOKEN GUIDE"):
-    st.markdown("1. Login to Unity site\n2. F12 > Network\n3. Refresh\n4. Find `allocations`\n5. Copy Bearer string.")
-raw_input = st.sidebar.text_area("Paste Bearer Token:", height=100)
-if st.sidebar.button("🔄 FORCE RE-SYNC"):
-    st.cache_data.clear()
-    st.rerun()
+with st.sidebar:
+    st.markdown("<h2 style='color:white;'>Hando.</h2>", unsafe_allow_html=True)
+    st.markdown("### ACCESS CONTROL")
+    raw_input = st.text_area("Bearer Token", placeholder="Paste token here...", height=150)
+    if st.button("REFRESH DATA", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.markdown("---")
+    st.caption("v2.4.0 - Premium Analytics")
 
 # --- 6. MAIN RENDER ---
-st.markdown("<h1>█ UNITY_CORE <span style='color:#00f2ff;'>MASTER_TERMINAL_v6</span></h1>", unsafe_allow_html=True)
+st.title("Analytics Overview")
+st.markdown("Welcome back! Here's what's happening with your nodes today.")
 
 if raw_input:
     df, balance, err = deep_sync(raw_input)
     if df is not None:
         
-        # --- PRE-CALCULATIONS ---
+        # Calculations
         now = datetime.now()
         today = now.date()
         yest = today - timedelta(days=1)
         s_days = today - timedelta(days=7)
-        
         r_7d = df[df['date_only'] >= s_days]['usd_amount'].sum()
         y_total = df[df['date_only'] == yest]['usd_amount'].sum()
         avg_daily = r_7d / 7
 
         # --- KPI SECTION ---
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("TOTAL BALANCE", f"${balance:,.2f}")
-        m2.metric("REWARDS (7D)", f"${r_7d:,.2f}")
-        m3.metric("YESTERDAY", f"${y_total:,.4f}")
-        m4.metric("EST. MONTHLY", f"${avg_daily * 30:,.2f}", delta=f"${avg_daily:.2f}/day")
+        m1.metric("Wallet Balance", f"${balance:,.2f}")
+        m2.metric("Revenue (7D)", f"${r_7d:,.2f}")
+        m3.metric("Yesterday", f"${y_total:,.4f}")
+        m4.metric("Est. Monthly", f"${avg_daily * 30:,.2f}")
 
-        # --- STATUS & PERFORMANCE GRIDS ---
-        st.markdown("---")
-        g1, g2 = st.columns(2)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- GRIDS ---
+        g1, g2 = st.columns([1, 1])
         
         with g1:
-            st.subheader("// NODE_HEARTBEAT")
+            st.markdown('<div class="hando-card">', unsafe_allow_html=True)
+            st.subheader("Node Heartbeat")
             unique_lics = sorted(df['LIC_RAW'].unique())
             last_payouts = df.groupby('LIC_RAW')['timestamp'].max().to_dict()
             html_hb = '<div class="status-grid">'
             for i, lic in enumerate(unique_lics, 1):
                 hrs = (now - last_payouts.get(lic)).total_seconds() / 3600
                 cls = "bg-green" if hrs <= 48 else "bg-yellow" if hrs <= 96 else "bg-red"
-                html_hb += f'<div class="status-box {cls}" title="ID: {lic} &#10;Last: {int(hrs)}h ago">#{i}</div>'
+                html_hb += f'<div class="status-box {cls}">#{i}</div>'
             html_hb += '</div>'
             st.markdown(html_hb, unsafe_allow_html=True)
-            st.caption("🟢 <48h | 🟡 <96h | 🔴 Offline")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with g2:
-            st.subheader("// BASELINE_EFFICIENCY_HEATMAP")
+            st.markdown('<div class="hando-card">', unsafe_allow_html=True)
+            st.subheader("Performance Heatmap")
             lic_avgs = []
             for lic in unique_lics:
                 sub = df[df['LIC_RAW'] == lic]
                 days = max(1, (now - sub['timestamp'].min()).days)
-                # Apply 0.015 - 5.0 Filter
-                clean_sub = sub[(sub['usd_amount'] >= 0.015) & (sub['usd_amount'] <= 5.0)]
-                lic_avgs.append({'lic': lic, 'avg': clean_sub['usd_amount'].sum() / days})
-            
+                lic_avgs.append({'avg': sub['usd_amount'].sum() / days})
             s_df = pd.DataFrame(lic_avgs)
             mi, ma = s_df['avg'].min(), s_df['avg'].max()
             html_heat = '<div class="status-grid">'
             for i, row in s_df.iterrows():
                 score = 1.0 if ma==mi else (row['avg'] - mi) / (ma - mi)
-                hue = int(score * 9) * (120 / 9)
-                style = f"background: hsla({hue}, 100%, 50%, 0.1); border: 1px solid hsl({hue}, 100%, 50%); color: hsl({hue}, 100%, 75%);"
-                html_heat += f'<div class="status-box" style="{style}" title="ID: {format_id(row["lic"])} &#10;Baseline: ${row["avg"]:.4f}/d">#{i+1}</div>'
+                # Hando-style Indigo Gradient
+                alpha = 0.1 + (score * 0.9)
+                html_heat += f'<div class="status-box" style="background: rgba(79, 70, 229, {alpha}); color: {"white" if alpha > 0.5 else "#4f46e5"}; border: 1px solid #4f46e5;">#{i+1}</div>'
             html_heat += '</div>'
             st.markdown(html_heat, unsafe_allow_html=True)
-            st.caption(f"Performance Gradient: ${mi:.3f} -> ${ma:.3f}/day")
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- VISUAL ANALYTICS ---
-        st.markdown("---")
-        st.subheader("// VISUAL_INTELLIGENCE_STREAM")
+        # --- CHARTS ---
         c1, c2 = st.columns(2)
         with c1:
+            st.markdown('<div class="hando-card">', unsafe_allow_html=True)
             daily_v = df.groupby('date_only')['usd_amount'].sum().reset_index()
-            st.plotly_chart(apply_chart_style(px.area(daily_v, x='date_only', y='usd_amount', title="DAILY REWARD FLOW", color_discrete_sequence=['#00f2ff'])), use_container_width=True)
+            fig = px.area(daily_v, x='date_only', y='usd_amount', title="Revenue Stream", color_discrete_sequence=['#4f46e5'])
+            st.plotly_chart(apply_chart_style(fig), use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
         with c2:
+            st.markdown('<div class="hando-card">', unsafe_allow_html=True)
             tx_v = df.groupby('date_only').size().reset_index(name='count')
-            st.plotly_chart(apply_chart_style(px.bar(tx_v, x='date_only', y='count', title="TRANSACTION VOLUME", color_discrete_sequence=['#7000ff'])), use_container_width=True)
+            fig = px.bar(tx_v, x='date_only', y='count', title="Activity Volume", color_discrete_sequence=['#94a3b8'])
+            st.plotly_chart(apply_chart_style(fig), use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- NODE LOG ---
-        st.markdown("---")
-        st.subheader("// NODE_HARDWARE_LOG")
-        node_stats = df.groupby('NODE_ID').agg({'LIC_RAW': 'nunique', 'usd_amount': 'sum'}).reset_index().rename(columns={'LIC_RAW': 'In Use', 'usd_amount': 'Total'})
-        node_stats['Available'] = 200 - node_stats['In Use']
-        node_7d = df[df['date_only'] >= s_days].groupby('NODE_ID')['usd_amount'].sum().reset_index().rename(columns={'usd_amount': '7D_Sum'})
-        node_stats = pd.merge(node_stats, node_7d, on='NODE_ID', how='left').fillna(0)
-        node_stats['Avg / Lic'] = node_stats['Total'] / node_stats['In Use']
-        node_stats['Avg Daily (7D)'] = node_stats['7D_Sum'] / 7
-        st.dataframe(node_stats.sort_values('Total', ascending=False).drop(columns=['7D_Sum']), column_config={"Total": st.column_config.NumberColumn(format="$ %.4f"), "Avg / Lic": st.column_config.NumberColumn(format="$ %.4f"), "Avg Daily (7D)": st.column_config.NumberColumn(format="$ %.4f")}, hide_index=True, use_container_width=True)
+        # --- TABLES ---
+        st.subheader("Node Performance Intelligence")
+        node_stats = df.groupby('NODE_ID').agg({'LIC_RAW': 'nunique', 'usd_amount': 'sum'}).reset_index()
+        node_stats.columns = ['Node ID', 'Licenses', 'Total Earned']
+        
+        st.dataframe(node_stats.sort_values('Total Earned', ascending=False), 
+                     column_config={"Total Earned": st.column_config.NumberColumn(format="$ %.4f")}, 
+                     hide_index=True, use_container_width=True)
 
         # --- DRILLDOWN ---
-        st.markdown("---")
-        st.subheader("// LICENSE_DIAGNOSTICS")
-        lic_map = {f"#{unique_lics.index(l)+1} - {format_id(l)}": l for l in unique_lics}
-        sel = st.selectbox("Select Target License:", options=list(lic_map.keys()))
+        st.markdown('<div class="hando-card" style="background:#f1f5f9; border:none;">', unsafe_allow_html=True)
+        st.subheader("Detailed Diagnostics")
+        lic_map = {f"Node License #{unique_lics.index(l)+1} ({format_id(l)})": l for l in unique_lics}
+        sel = st.selectbox("Select specific license for deep-dive:", options=list(lic_map.keys()))
         lic_raw = lic_map[sel]
-        l_df = df[df['LIC_RAW'] == lic_raw].sort_values('timestamp')
+        l_df = df[df['LIC_RAW'] == lic_raw]
         
-        st.markdown(f"<div class='drilldown-box'>### 🔍 CORE_DIAGNOSTICS: {sel}", unsafe_allow_html=True)
-        d1, d2, d3 = st.columns(3)
-        start = l_df['timestamp'].min(); days = max(1, (now - start).days)
-        d1.markdown(f"**ACTIVE SINCE:**<br>{start.strftime('%Y-%m-%d')}<br>({days} Days)", unsafe_allow_html=True)
-        d2.markdown(f"**DAILY AVG:** ${l_df['usd_amount'].sum()/days:,.4f}<br>**PEAK:** ${l_df['usd_amount'].max():,.4f}", unsafe_allow_html=True)
-        d3.markdown(f"**NODE:** {format_id(l_df['NODE_RAW'].iloc[0])}<br>**WALLET:** {l_df['WALLET_RAW'].iloc[0]}", unsafe_allow_html=True)
-        
-        seen_dates = set(l_df['date_only'].unique())
-        outages = [d.date() for d in pd.date_range(start.date(), today) if d.date() not in seen_dates]
-        if outages: 
-            st.warning(f"⚠️ {len(outages)} DAYS OFFLINE DETECTED")
-            with st.expander("View Outage History"): st.write(", ".join([o.strftime('%b %d') for o in outages]))
-        else: st.success("✅ 100% STABILITY RECORDED")
-        st.markdown("</div>", unsafe_allow_html=True)
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Total Payouts", len(l_df))
+        col_b.metric("Avg Daily", f"${l_df['usd_amount'].sum()/max(1,(now-l_df['timestamp'].min()).days):,.4f}")
+        col_c.metric("Status", "STABLE" if len(l_df[l_df['date_only'] == yest]) > 0 else "INACTIVE", delta_color="normal")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- MATRIX (BOTTOM) ---
-        st.markdown("---")
-        st.subheader("// PERFORMANCE_MATRIX (7D)")
-        d_range = [(today - timedelta(days=i)) for i in range(1, 8)]
-        lic_tot = df.groupby('LIC_RAW')['usd_amount'].sum().rename('TOTAL_USD').reset_index()
-        piv = df[df['date_only'].isin(d_range)].pivot_table(index='LIC_RAW', columns='date_only', values='usd_amount', aggfunc='sum').fillna(0)
-        piv.columns = [d.strftime('%Y-%m-%d') for d in piv.columns]
-        mat = pd.merge(lic_tot, piv, on='LIC_RAW', how='left').fillna(0).sort_values('TOTAL_USD', ascending=False)
-        mat['LIC_RAW'] = mat['LIC_RAW'].apply(format_id)
-        cnf = {"LIC_RAW": "ID", "TOTAL_USD": st.column_config.NumberColumn("TOTAL", format="$ %.4f")}
-        for d in d_range: cnf[d.strftime('%Y-%m-%d')] = st.column_config.NumberColumn(d.strftime('%b %d'), format="$ %.4f")
-        st.dataframe(mat, column_config=cnf, use_container_width=True, hide_index=True)
-
-    else: st.error(f"📡 SYNC ERROR: {err}")
-else: st.info("👈 SYSTEM LOCKED. Paste Bearer Token in sidebar to initialize.")
+    else: st.error(f"Sync failed: {err}")
+else:
+    st.info("System Standby. Please enter your Bearer Token in the sidebar to initialize analytics.")
