@@ -3,6 +3,8 @@ import requests
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
+from streamlit_javascript import st_javascript
+
 
 # ==================================
 # CONFIG
@@ -88,6 +90,37 @@ h1,h2,h3{
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ==================================
+# WALLET AUTH
+# ==================================
+def fetch_unity_token():
+
+    token = st_javascript("""
+    async () => {
+
+        window.open(
+            "https://manage.unitynodes.io",
+            "_blank"
+        );
+
+        await new Promise(
+            r => setTimeout(r, 5000)
+        );
+
+        const token =
+            localStorage.getItem("token")
+            ||
+            localStorage.getItem("access_token")
+            ||
+            localStorage.getItem("authToken");
+
+        return token;
+    }
+    """)
+
+    return token
 
 
 # ==================================
@@ -219,15 +252,6 @@ def chart_style(fig):
 )
 def deep_sync(token):
 
-    token = (
-        token
-        .strip()
-        .replace(
-            "Bearer ",
-            ""
-        )
-    )
-
     headers = {
         "apikey": API_KEY,
         "authorization": f"Bearer {token}",
@@ -236,14 +260,10 @@ def deep_sync(token):
 
     try:
 
-        # ------------------
-        # BALANCE
-        # ------------------
         r_bal = requests.post(
             API_URL_BAL,
             headers=headers,
-            json={},
-            timeout=10
+            json={}
         )
 
         raw_balance, all_licenses = (
@@ -256,9 +276,6 @@ def deep_sync(token):
             raw_balance / 1_000_000
         )
 
-        # ------------------
-        # HISTORY
-        # ------------------
         rows = []
 
         skip = 0
@@ -278,8 +295,7 @@ def deep_sync(token):
                 json={
                     "skip": skip,
                     "take": batch
-                },
-                timeout=15
+                }
             )
 
             if r.status_code != 200:
@@ -301,59 +317,32 @@ def deep_sync(token):
 
         sync.empty()
 
-        if not rows:
-
-            return (
-                None,
-                balance,
-                all_licenses,
-                "No history"
-            )
-
         df = pd.DataFrame(
             rows
         )
 
-        # ------------------
-        # COLUMN DETECTION
-        # ------------------
         d_col = next(
-            (
-                c for c in df.columns
-                if "time" in c.lower()
-                or "created" in c.lower()
-            ),
-            None
+            c for c in df.columns
+            if "time" in c.lower()
+            or "created" in c.lower()
         )
 
         a_col = next(
-            (
-                c for c in df.columns
-                if "amount" in c.lower()
-                or "reward" in c.lower()
-            ),
-            None
+            c for c in df.columns
+            if "amount" in c.lower()
+            or "reward" in c.lower()
         )
 
         node_col = next(
-            (
-                c for c in df.columns
-                if "node" in c.lower()
-            ),
-            None
+            c for c in df.columns
+            if "node" in c.lower()
         )
 
         lic_col = next(
-            (
-                c for c in df.columns
-                if "license" in c.lower()
-            ),
-            None
+            c for c in df.columns
+            if "license" in c.lower()
         )
 
-        # ------------------
-        # CLEAN
-        # ------------------
         df["timestamp"] = (
             pd.to_datetime(
                 df[d_col],
@@ -417,21 +406,44 @@ def deep_sync(token):
 # ==================================
 with st.sidebar:
 
-    st.markdown(
-        "## Hando."
-    )
+    st.markdown("## Hando.")
 
-    token = st.text_area(
-        "Bearer Token",
-        height=150
-    )
+    if "unity_token" not in st.session_state:
 
-    if st.button(
-        "REFRESH",
-        use_container_width=True
-    ):
-        st.cache_data.clear()
-        st.rerun()
+        if st.button(
+            "🦊 Connect Wallet",
+            use_container_width=True
+        ):
+
+            token = fetch_unity_token()
+
+            if token:
+
+                st.session_state[
+                    "unity_token"
+                ] = token
+
+                st.rerun()
+
+            else:
+
+                st.warning(
+                    "Please login in Unity tab first."
+                )
+
+    else:
+
+        st.success(
+            "Wallet Connected"
+        )
+
+        if st.button(
+            "Disconnect",
+            use_container_width=True
+        ):
+
+            st.session_state.clear()
+            st.rerun()
 
 
 # ==================================
@@ -441,10 +453,14 @@ st.title(
     "Analytics Overview"
 )
 
-if token:
+if "unity_token" in st.session_state:
 
     df, balance, all_licenses, err = (
-        deep_sync(token)
+        deep_sync(
+            st.session_state[
+                "unity_token"
+            ]
+        )
     )
 
     if df is not None:
@@ -457,26 +473,19 @@ if token:
             today - timedelta(days=1)
         )
 
-        start_7d = (
+        week = (
             today - timedelta(days=7)
         )
 
-        revenue_7d = df[
-            df["date_only"] >= start_7d
+        rev7 = df[
+            df["date_only"] >= week
         ]["usd_amount"].sum()
 
-        revenue_yesterday = df[
+        rev1 = df[
             df["date_only"] == yesterday
         ]["usd_amount"].sum()
 
-        avg_daily = (
-            revenue_7d / 7
-        )
-
-        # KPIs
-        m1, m2, m3, m4 = (
-            st.columns(4)
-        )
+        m1, m2, m3 = st.columns(3)
 
         m1.metric(
             "Wallet",
@@ -485,22 +494,15 @@ if token:
 
         m2.metric(
             "7D",
-            f"${revenue_7d:,.2f}"
+            f"${rev7:,.2f}"
         )
 
         m3.metric(
             "Yesterday",
-            f"${revenue_yesterday:,.4f}"
+            f"${rev1:,.4f}"
         )
 
-        m4.metric(
-            "Projected",
-            f"${avg_daily*30:,.2f}"
-        )
-
-        # ==================
-        # ACTIVE STATUS
-        # ==================
+        # license status
         active = set(
             str(x)
             for x in df[
@@ -521,145 +523,100 @@ if token:
             "License Status"
         )
 
-        s1, s2 = st.columns(2)
+        a, b = st.columns(2)
 
-        s1.metric(
+        a.metric(
             "Active",
             len(active)
         )
 
-        s2.metric(
+        b.metric(
             "Inactive",
             len(inactive)
         )
 
         if inactive:
 
-            inactive_df = (
-                pd.DataFrame({
-                    "Inactive Licenses": [
-                        format_id(x)
-                        for x in inactive
-                    ]
-                })
-            )
-
             st.dataframe(
-                inactive_df,
-                hide_index=True,
-                use_container_width=True
+                pd.DataFrame({
+                    "Inactive":
+                        [
+                            format_id(x)
+                            for x in inactive
+                        ]
+                }),
+                hide_index=True
             )
 
-        # ==================
-        # CHARTS
-        # ==================
-        c1, c2 = st.columns(2)
+        # heartbeat
+        st.subheader(
+            "Heartbeat"
+        )
 
-        with c1:
+        payouts = (
+            df.groupby(
+                "LIC_RAW"
+            )["timestamp"]
+            .max()
+            .to_dict()
+        )
 
-            st.markdown(
-                '<div class="hando-card">',
-                unsafe_allow_html=True
+        html = (
+            '<div class="status-grid">'
+        )
+
+        for i, lic in enumerate(
+            sorted(active),
+            1
+        ):
+
+            hrs = (
+                now-payouts[lic]
+            ).total_seconds()/3600
+
+            if hrs <= 48:
+                cls = "bg-green"
+            elif hrs <= 96:
+                cls = "bg-yellow"
+            else:
+                cls = "bg-red"
+
+            html += (
+                f'<div class="status-box {cls}">#{i}</div>'
             )
 
-            st.subheader(
-                "Heartbeat"
-            )
+        html += "</div>"
 
-            payouts = (
-                df.groupby(
-                    "LIC_RAW"
-                )["timestamp"]
-                .max()
-                .to_dict()
-            )
+        st.markdown(
+            html,
+            unsafe_allow_html=True
+        )
 
-            html = (
-                '<div class="status-grid">'
-            )
+        # revenue
+        st.subheader(
+            "Revenue"
+        )
 
-            licenses = sorted(
-                df[
-                    "LIC_RAW"
-                ].unique()
-            )
+        daily = (
+            df.groupby(
+                "date_only"
+            )["usd_amount"]
+            .sum()
+            .reset_index()
+        )
 
-            for i, lic in enumerate(
-                licenses,
-                1
-            ):
+        fig = px.area(
+            daily,
+            x="date_only",
+            y="usd_amount"
+        )
 
-                last = payouts.get(
-                    lic
-                )
+        st.plotly_chart(
+            chart_style(fig),
+            use_container_width=True
+        )
 
-                hrs = (
-                    now-last
-                ).total_seconds()/3600
-
-                if hrs <= 48:
-                    cls = "bg-green"
-
-                elif hrs <= 96:
-                    cls = "bg-yellow"
-
-                else:
-                    cls = "bg-red"
-
-                html += (
-                    f'<div class="status-box {cls}">#{i}</div>'
-                )
-
-            html += "</div>"
-
-            st.markdown(
-                html,
-                unsafe_allow_html=True
-            )
-
-            st.markdown(
-                "</div>",
-                unsafe_allow_html=True
-            )
-
-        with c2:
-
-            st.markdown(
-                '<div class="hando-card">',
-                unsafe_allow_html=True
-            )
-
-            st.subheader(
-                "Revenue"
-            )
-
-            daily = (
-                df.groupby(
-                    "date_only"
-                )["usd_amount"]
-                .sum()
-                .reset_index()
-            )
-
-            fig = px.area(
-                daily,
-                x="date_only",
-                y="usd_amount"
-            )
-
-            st.plotly_chart(
-                chart_style(fig),
-                use_container_width=True
-            )
-
-            st.markdown(
-                "</div>",
-                unsafe_allow_html=True
-            )
-
-        # ==================
-        # NODE MAP
-        # ==================
+        # nodes
         st.subheader(
             "Node Intelligence"
         )
@@ -718,28 +675,17 @@ if token:
                     "Licenses",
                     "Total"
                 ]
-            ].sort_values(
-                "Total",
-                ascending=False
-            ),
-            column_config={
-                "Total":
-                    st.column_config.NumberColumn(
-                        format="$ %.4f"
-                    )
-            },
+            ],
             hide_index=True,
             use_container_width=True
         )
 
     else:
 
-        st.error(
-            err
-        )
+        st.error(err)
 
 else:
 
     st.info(
-        "Paste your Bearer token."
+        "Click Connect Wallet."
     )
