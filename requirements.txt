@@ -2,6 +2,6 @@ streamlit
 pandas
 requests
 plotly
-streamlit-wallet-connect
-web3
+streamlit-metamask
 supabase
+web3
