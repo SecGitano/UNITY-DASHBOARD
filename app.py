@@ -4,23 +4,23 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# =========================
+# ==================================
 # CONFIG
-# =========================
+# ==================================
 API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
 st.set_page_config(
-    page_title="Unity Analytics // Hando Core",
+    page_title="Unity Analytics",
     layout="wide",
     page_icon="🌙"
 )
 
 
-# =========================
+# ==================================
 # DARK THEME
-# =========================
+# ==================================
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -33,12 +33,10 @@ st.markdown("""
 
 h1,h2,h3{
     color:#f8fafc !important;
-    font-weight:700 !important;
 }
 
 [data-testid="stSidebar"]{
     background:#020617 !important;
-    border-right:1px solid #334155;
 }
 
 [data-testid="stSidebar"] *{
@@ -50,14 +48,6 @@ h1,h2,h3{
     border:1px solid #334155;
     border-radius:12px;
     padding:20px !important;
-}
-
-[data-testid="stMetricValue"]{
-    color:#f8fafc !important;
-}
-
-[data-testid="stMetricLabel"]{
-    color:#94a3b8 !important;
 }
 
 .hando-card{
@@ -72,15 +62,14 @@ h1,h2,h3{
     display:grid;
     grid-template-columns:repeat(auto-fill,minmax(45px,1fr));
     gap:8px;
-    margin:15px 0;
 }
 
 .status-box{
     padding:10px 0;
     text-align:center;
     border-radius:6px;
-    font-weight:600;
     font-size:.75em;
+    font-weight:600;
 }
 
 .bg-green{
@@ -101,44 +90,113 @@ h1,h2,h3{
 """, unsafe_allow_html=True)
 
 
-# =========================
+# ==================================
 # HELPERS
-# =========================
-def format_id(id_val):
-    s = str(id_val)
-    return f"{s[:4]}...{s[-4:]}" if len(s) > 10 else s
+# ==================================
+def format_id(v):
+
+    s = str(v)
+
+    if len(s) <= 10:
+        return s
+
+    return f"{s[:4]}...{s[-4:]}"
 
 
-def parse_balance(data):
+def parse_balance_and_licenses(data):
+
+    balance = 0
+    licenses = []
+
     try:
-        if isinstance(data, (int, float)):
-            return float(data)
 
-        if isinstance(data, list) and len(data):
+        if isinstance(data, list):
 
-            item = data[0]
+            for item in data:
 
-            if isinstance(item, (int, float)):
-                return float(item)
+                if not isinstance(
+                    item,
+                    dict
+                ):
+                    continue
 
-            if isinstance(item, dict):
-                return float(
-                    next(iter(item.values()))
-                )
+                for k, v in item.items():
 
-        return 0.0
+                    if isinstance(
+                        v,
+                        (
+                            int,
+                            float
+                        )
+                    ):
+                        balance = float(v)
+
+                    if "license" in k.lower():
+
+                        if isinstance(
+                            v,
+                            list
+                        ):
+                            licenses.extend(v)
+
+                        else:
+                            licenses.append(v)
+
+        elif isinstance(
+            data,
+            dict
+        ):
+
+            for k, v in data.items():
+
+                if isinstance(
+                    v,
+                    (
+                        int,
+                        float
+                    )
+                ):
+                    balance = float(v)
+
+                if "license" in k.lower():
+
+                    if isinstance(
+                        v,
+                        list
+                    ):
+                        licenses.extend(v)
+
+                    else:
+                        licenses.append(v)
+
+        licenses = list(
+            set(
+                str(x)
+                for x in licenses
+                if x
+            )
+        )
+
+        return (
+            balance,
+            licenses
+        )
 
     except:
-        return 0.0
+
+        return (
+            0,
+            []
+        )
 
 
-def apply_chart_style(fig):
+def chart_style(fig):
 
     fig.update_layout(
         paper_bgcolor="#1e293b",
         plot_bgcolor="#1e293b",
-        font_family="Inter",
         font_color="#cbd5e1",
+        font_family="Inter",
         xaxis=dict(
             showgrid=True,
             gridcolor="#334155"
@@ -152,16 +210,22 @@ def apply_chart_style(fig):
     return fig
 
 
-# =========================
+# ==================================
 # DATA ENGINE
-# =========================
-@st.cache_data(ttl=600, show_spinner=False)
+# ==================================
+@st.cache_data(
+    ttl=600,
+    show_spinner=False
+)
 def deep_sync(token):
 
     token = (
         token
         .strip()
-        .replace("Bearer ", "")
+        .replace(
+            "Bearer ",
+            ""
+        )
     )
 
     headers = {
@@ -172,9 +236,9 @@ def deep_sync(token):
 
     try:
 
-        # -------------------
+        # ------------------
         # BALANCE
-        # -------------------
+        # ------------------
         r_bal = requests.post(
             API_URL_BAL,
             headers=headers,
@@ -182,26 +246,30 @@ def deep_sync(token):
             timeout=10
         )
 
-        balance = (
-            parse_balance(
+        raw_balance, all_licenses = (
+            parse_balance_and_licenses(
                 r_bal.json()
-            ) / 1_000_000
+            )
         )
 
-        # -------------------
+        balance = (
+            raw_balance / 1_000_000
+        )
+
+        # ------------------
         # HISTORY
-        # -------------------
-        all_rows = []
+        # ------------------
+        rows = []
 
         skip = 0
         batch = 1000
 
-        sync_box = st.empty()
+        sync = st.empty()
 
         while True:
 
-            sync_box.info(
-                f"Syncing packet {skip}"
+            sync.info(
+                f"Syncing {skip}"
             )
 
             r = requests.post(
@@ -217,30 +285,38 @@ def deep_sync(token):
             if r.status_code != 200:
                 break
 
-            rows = r.json()
+            packet = r.json()
 
-            if not rows:
+            if not packet:
                 break
 
-            all_rows.extend(rows)
+            rows.extend(
+                packet
+            )
 
-            if len(rows) < batch:
+            if len(packet) < batch:
                 break
 
             skip += batch
 
-        sync_box.empty()
+        sync.empty()
 
-        if not all_rows:
-            return None, balance, "No history"
+        if not rows:
+
+            return (
+                None,
+                balance,
+                all_licenses,
+                "No history"
+            )
 
         df = pd.DataFrame(
-            all_rows
+            rows
         )
 
-        # -------------------
+        # ------------------
         # COLUMN DETECTION
-        # -------------------
+        # ------------------
         d_col = next(
             (
                 c for c in df.columns
@@ -275,16 +351,9 @@ def deep_sync(token):
             None
         )
 
-        if not all(
-            [d_col, a_col, node_col, lic_col]
-        ):
-            raise Exception(
-                f"Bad schema: {list(df.columns)}"
-            )
-
-        # -------------------
-        # CLEAN DATA
-        # -------------------
+        # ------------------
+        # CLEAN
+        # ------------------
         df["timestamp"] = (
             pd.to_datetime(
                 df[d_col],
@@ -326,23 +395,35 @@ def deep_sync(token):
             .apply(format_id)
         )
 
-        return df, balance, None
+        return (
+            df,
+            balance,
+            all_licenses,
+            None
+        )
 
     except Exception as e:
 
-        return None, 0, str(e)
+        return (
+            None,
+            0,
+            [],
+            str(e)
+        )
 
 
-# =========================
+# ==================================
 # SIDEBAR
-# =========================
+# ==================================
 with st.sidebar:
 
-    st.markdown("## Hando.")
+    st.markdown(
+        "## Hando."
+    )
 
-    raw_input = st.text_area(
+    token = st.text_area(
         "Bearer Token",
-        height=160
+        height=150
     )
 
     if st.button(
@@ -353,15 +434,17 @@ with st.sidebar:
         st.rerun()
 
 
-# =========================
+# ==================================
 # MAIN
-# =========================
-st.title("Analytics Overview")
+# ==================================
+st.title(
+    "Analytics Overview"
+)
 
-if raw_input:
+if token:
 
-    df, balance, err = (
-        deep_sync(raw_input)
+    df, balance, all_licenses, err = (
+        deep_sync(token)
     )
 
     if df is not None:
@@ -401,7 +484,7 @@ if raw_input:
         )
 
         m2.metric(
-            "7D Revenue",
+            "7D",
             f"${revenue_7d:,.2f}"
         )
 
@@ -411,18 +494,67 @@ if raw_input:
         )
 
         m4.metric(
-            "Projected Month",
+            "Projected",
             f"${avg_daily*30:,.2f}"
         )
 
-        st.markdown("")
+        # ==================
+        # ACTIVE STATUS
+        # ==================
+        active = set(
+            str(x)
+            for x in df[
+                "LIC_RAW"
+            ].unique()
+        )
 
-        # =====================
-        # ROW
-        # =====================
+        known = set(
+            str(x)
+            for x in all_licenses
+        )
+
+        inactive = sorted(
+            known - active
+        )
+
+        st.subheader(
+            "License Status"
+        )
+
+        s1, s2 = st.columns(2)
+
+        s1.metric(
+            "Active",
+            len(active)
+        )
+
+        s2.metric(
+            "Inactive",
+            len(inactive)
+        )
+
+        if inactive:
+
+            inactive_df = (
+                pd.DataFrame({
+                    "Inactive Licenses": [
+                        format_id(x)
+                        for x in inactive
+                    ]
+                })
+            )
+
+            st.dataframe(
+                inactive_df,
+                hide_index=True,
+                use_container_width=True
+            )
+
+        # ==================
+        # CHARTS
+        # ==================
         c1, c2 = st.columns(2)
 
-        # Heartbeat
         with c1:
 
             st.markdown(
@@ -431,7 +563,7 @@ if raw_input:
             )
 
             st.subheader(
-                "Node Heartbeat"
+                "Heartbeat"
             )
 
             payouts = (
@@ -447,8 +579,9 @@ if raw_input:
             )
 
             licenses = sorted(
-                df["LIC_RAW"]
-                .unique()
+                df[
+                    "LIC_RAW"
+                ].unique()
             )
 
             for i, lic in enumerate(
@@ -460,21 +593,18 @@ if raw_input:
                     lic
                 )
 
-                if pd.isna(last):
-                    cls = "bg-red"
+                hrs = (
+                    now-last
+                ).total_seconds()/3600
+
+                if hrs <= 48:
+                    cls = "bg-green"
+
+                elif hrs <= 96:
+                    cls = "bg-yellow"
 
                 else:
-
-                    hrs = (
-                        now-last
-                    ).total_seconds()/3600
-
-                    if hrs <= 48:
-                        cls = "bg-green"
-                    elif hrs <= 96:
-                        cls = "bg-yellow"
-                    else:
-                        cls = "bg-red"
+                    cls = "bg-red"
 
                 html += (
                     f'<div class="status-box {cls}">#{i}</div>'
@@ -492,7 +622,6 @@ if raw_input:
                 unsafe_allow_html=True
             )
 
-        # Revenue Chart
         with c2:
 
             st.markdown(
@@ -501,7 +630,7 @@ if raw_input:
             )
 
             st.subheader(
-                "Revenue Stream"
+                "Revenue"
             )
 
             daily = (
@@ -519,7 +648,7 @@ if raw_input:
             )
 
             st.plotly_chart(
-                apply_chart_style(fig),
+                chart_style(fig),
                 use_container_width=True
             )
 
@@ -528,44 +657,48 @@ if raw_input:
                 unsafe_allow_html=True
             )
 
-        # =====================
-        # NODE TABLE
-        # =====================
+        # ==================
+        # NODE MAP
+        # ==================
         st.subheader(
             "Node Intelligence"
         )
 
-        node_stats = (
-            df.groupby("NODE_ID")
+        nodes = (
+            df.groupby(
+                "NODE_ID"
+            )
             .agg({
                 "LIC_RAW":
                     lambda x:
-                    sorted(set(x)),
+                    sorted(
+                        set(x)
+                    ),
                 "usd_amount":
                     "sum"
             })
             .reset_index()
         )
 
-        node_stats.columns = [
-            "Node ID",
+        nodes.columns = [
+            "Node",
             "Licenses",
-            "Total Earned"
+            "Total"
         ]
 
-        node_stats[
-            "License Count"
+        nodes[
+            "Count"
         ] = (
-            node_stats[
+            nodes[
                 "Licenses"
             ]
             .apply(len)
         )
 
-        node_stats[
+        nodes[
             "Licenses"
         ] = (
-            node_stats[
+            nodes[
                 "Licenses"
             ]
             .apply(
@@ -577,22 +710,20 @@ if raw_input:
             )
         )
 
-        node_stats = node_stats[
-            [
-                "Node ID",
-                "License Count",
-                "Licenses",
-                "Total Earned"
-            ]
-        ]
-
         st.dataframe(
-            node_stats.sort_values(
-                "Total Earned",
+            nodes[
+                [
+                    "Node",
+                    "Count",
+                    "Licenses",
+                    "Total"
+                ]
+            ].sort_values(
+                "Total",
                 ascending=False
             ),
             column_config={
-                "Total Earned":
+                "Total":
                     st.column_config.NumberColumn(
                         format="$ %.4f"
                     )
@@ -604,11 +735,11 @@ if raw_input:
     else:
 
         st.error(
-            f"Sync failed: {err}"
+            err
         )
 
 else:
 
     st.info(
-        "Paste your Bearer token in the sidebar."
+        "Paste your Bearer token."
     )
