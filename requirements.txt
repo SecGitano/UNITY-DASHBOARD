@@ -1,7 +1,7 @@
 streamlit
-requests
 pandas
+requests
 plotly
-streamlit-javascript
 streamlit-wallet-connect
 web3
+supabase
