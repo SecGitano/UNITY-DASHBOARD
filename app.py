@@ -3,6 +3,8 @@ import requests
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
+from streamlit_javascript import st_javascript
+
 
 # ==================================
 # CONFIG
@@ -11,21 +13,23 @@ API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
 
+SUPABASE_URL = "https://vtllpagtmncbkywsqccd.supabase.co"
+SUPABASE_ANON = API_KEY
+
+
 st.set_page_config(
     page_title="Unity Analytics",
     layout="wide",
     page_icon="🌙"
 )
 
+
 # ==================================
-# DARK UI
+# DARK MODE
 # ==================================
 st.markdown("""
 <style>
-.stApp {
-    background:#0f172a;
-    color:#e2e8f0;
-}
+.stApp { background:#0f172a; color:#e2e8f0; }
 
 h1,h2,h3 { color:#f8fafc !important; }
 
@@ -35,9 +39,9 @@ h1,h2,h3 { color:#f8fafc !important; }
 
 [data-testid="stMetric"]{
     background:#1e293b;
-    border:1px solid #334155;
     border-radius:12px;
-    padding:20px;
+    border:1px solid #334155;
+    padding:18px;
 }
 
 .card {
@@ -46,25 +50,9 @@ h1,h2,h3 { color:#f8fafc !important; }
     border-radius:12px;
     border:1px solid #334155;
 }
-
-.status-grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fill,minmax(40px,1fr));
-    gap:6px;
-}
-
-.status-box{
-    padding:8px;
-    text-align:center;
-    border-radius:6px;
-    font-size:12px;
-}
-
-.green{background:#14532d;color:#bbf7d0;}
-.yellow{background:#713f12;color:#fde68a;}
-.red{background:#7f1d1d;color:#fecaca;}
 </style>
 """, unsafe_allow_html=True)
+
 
 # ==================================
 # HELPERS
@@ -78,14 +66,68 @@ def parse_balance(data):
     try:
         if isinstance(data, (int, float)):
             return float(data)
-
         if isinstance(data, list) and data:
-            item = data[0]
-            if isinstance(item, dict):
-                return float(next(iter(item.values())))
+            return float(list(data[0].values())[0])
         return 0.0
     except:
         return 0.0
+
+
+# ==================================
+# SIWE LOGIN (FULL AUTO)
+# ==================================
+def siwe_login():
+
+    auth = st_javascript(f"""
+    async () => {{
+
+        if (!window.ethereum) {{
+            return {{error: "no_wallet"}};
+        }}
+
+        const accounts = await window.ethereum.request({{
+            method: "eth_requestAccounts"
+        }});
+
+        const address = accounts[0];
+
+        const nonceRes = await fetch(
+            "{SUPABASE_URL}/auth/v1/otp",
+            {{
+                method: "POST",
+                headers: {{
+                    "apikey": "{SUPABASE_ANON}",
+                    "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{
+                    "email": address + "@wallet.local"
+                }})
+            }}
+        );
+
+        const message =
+            `Sign in to Unity Analytics\\nWallet: ${{address}}\\nNonce: login`;
+
+        const signature = await window.ethereum.request({{
+            method: "personal_sign",
+            params: [message, address]
+        }});
+
+        return {{
+            address,
+            signature,
+            message
+        }};
+    }}
+    """)
+
+    if not auth:
+        return None
+
+    if isinstance(auth, dict) and auth.get("error"):
+        return None
+
+    return auth["address"]
 
 
 # ==================================
@@ -126,7 +168,7 @@ def deep_sync(token):
             skip += 1000
 
         if not rows:
-            return None, 0, "No data"
+            return None, 0, None
 
         df = pd.DataFrame(rows)
 
@@ -143,7 +185,6 @@ def deep_sync(token):
 
         df["NODE_RAW"] = df[node_col]
         df["LIC_RAW"] = df[lic_col]
-
         df["NODE_ID"] = df["NODE_RAW"].apply(format_id)
 
         return df, balance, None
@@ -153,23 +194,31 @@ def deep_sync(token):
 
 
 # ==================================
-# AUTH (TEMP SIMPLE VERSION)
+# AUTH FLOW
 # ==================================
 with st.sidebar:
+
     st.markdown("## Hando")
 
-    token = st.text_input(
-        "Unity JWT Token",
-        type="password"
-    )
+    if "wallet" not in st.session_state:
 
-    st.caption(
-        "Login is handled via MetaMask on Unity portal for now"
-    )
+        if st.button("🦊 Connect Wallet", use_container_width=True):
 
-    if st.button("Refresh"):
-        st.cache_data.clear()
-        st.rerun()
+            wallet = siwe_login()
+
+            if wallet:
+
+                st.session_state["wallet"] = wallet
+                st.success(f"Connected {wallet[:6]}...{wallet[-4:]}")
+                st.rerun()
+
+    else:
+
+        st.success(f"Wallet: {st.session_state['wallet'][:6]}...")
+
+        if st.button("Disconnect"):
+            st.session_state.clear()
+            st.rerun()
 
 
 # ==================================
@@ -177,7 +226,10 @@ with st.sidebar:
 # ==================================
 st.title("Analytics Overview")
 
-if token:
+if "wallet" in st.session_state:
+
+    # For now: wallet acts as identity gate
+    token = API_KEY  # Unity backend still authorizes via project key
 
     df, balance, err = deep_sync(token)
 
@@ -195,59 +247,22 @@ if token:
 
         c1, c2, c3 = st.columns(3)
 
-        c1.metric("Wallet", f"${balance:,.2f}")
+        c1.metric("Wallet Connected", "✔")
         c2.metric("7D Revenue", f"${rev7:,.2f}")
         c3.metric("Yesterday", f"${rev1:,.4f}")
 
-        # =====================
-        # LICENSE STATUS
-        # =====================
         st.subheader("License Status")
+        st.metric("Active Licenses", df["LIC_RAW"].nunique())
 
-        active = set(df["LIC_RAW"].unique())
-
-        st.metric("Active Licenses", len(active))
-
-        # =====================
-        # HEARTBEAT GRID
-        # =====================
-        st.subheader("Heartbeat")
-
-        payouts = df.groupby("LIC_RAW")["timestamp"].max().to_dict()
-
-        html = '<div class="status-grid">'
-
-        for i, lic in enumerate(active, 1):
-
-            hrs = (now - payouts[lic]).total_seconds() / 3600
-
-            if hrs <= 48:
-                cls = "green"
-            elif hrs <= 96:
-                cls = "yellow"
-            else:
-                cls = "red"
-
-            html += f'<div class="status-box {cls}">#{i}</div>'
-
-        html += "</div>"
-
-        st.markdown(html, unsafe_allow_html=True)
-
-        # =====================
-        # REVENUE CHART
-        # =====================
         st.subheader("Revenue")
 
         daily = df.groupby("date_only")["usd_amount"].sum().reset_index()
 
-        fig = px.area(daily, x="date_only", y="usd_amount")
+        st.plotly_chart(
+            px.area(daily, x="date_only", y="usd_amount"),
+            use_container_width=True
+        )
 
-        st.plotly_chart(fig, use_container_width=True)
-
-        # =====================
-        # NODE TABLE
-        # =====================
         st.subheader("Node Intelligence")
 
         nodes = df.groupby("NODE_ID").agg({
@@ -255,10 +270,10 @@ if token:
             "usd_amount": "sum"
         }).reset_index()
 
-        nodes.columns = ["Node", "Licenses", "Total Earned"]
+        nodes.columns = ["Node", "Licenses", "Total"]
 
         st.dataframe(nodes, use_container_width=True)
 
 else:
 
-    st.info("Paste your Unity JWT token to continue.")
+    st.info("Click Connect Wallet to begin")
