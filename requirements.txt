@@ -3,3 +3,4 @@ requests
 pandas
 plotly
 streamlit-wallet-connect
+streamlit-javascript
