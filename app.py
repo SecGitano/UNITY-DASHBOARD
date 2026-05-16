@@ -4,13 +4,29 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
+from streamlit_wallet_connect import wallet_connect
+from supabase import create_client
+
 
 # ==================================
 # CONFIG
 # ==================================
 API_URL_BAL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_balance"
 API_URL_HIS = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
-API_KEY = "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
+
+SUPABASE_URL = (
+    "https://vtllpagtmncbkywsqccd.supabase.co"
+)
+
+SUPABASE_KEY = (
+    "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c"
+)
+
+supabase = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY
+)
+
 
 st.set_page_config(
     page_title="Unity Analytics",
@@ -107,32 +123,58 @@ def parse_balance_and_licenses(data):
 
             for item in data:
 
-                if not isinstance(item, dict):
+                if not isinstance(
+                    item,
+                    dict
+                ):
                     continue
 
                 for k, v in item.items():
 
-                    if isinstance(v, (int, float)):
+                    if isinstance(
+                        v,
+                        (
+                            int,
+                            float
+                        )
+                    ):
                         balance = float(v)
 
                     if "license" in k.lower():
 
-                        if isinstance(v, list):
+                        if isinstance(
+                            v,
+                            list
+                        ):
                             licenses.extend(v)
+
                         else:
                             licenses.append(v)
 
-        elif isinstance(data, dict):
+        elif isinstance(
+            data,
+            dict
+        ):
 
             for k, v in data.items():
 
-                if isinstance(v, (int, float)):
+                if isinstance(
+                    v,
+                    (
+                        int,
+                        float
+                    )
+                ):
                     balance = float(v)
 
                 if "license" in k.lower():
 
-                    if isinstance(v, list):
+                    if isinstance(
+                        v,
+                        list
+                    ):
                         licenses.extend(v)
+
                     else:
                         licenses.append(v)
 
@@ -144,11 +186,17 @@ def parse_balance_and_licenses(data):
             )
         )
 
-        return balance, licenses
+        return (
+            balance,
+            licenses
+        )
 
     except:
 
-        return 0, []
+        return (
+            0,
+            []
+        )
 
 
 def chart_style(fig):
@@ -172,27 +220,51 @@ def chart_style(fig):
 
 
 # ==================================
+# AUTH
+# ==================================
+def unity_wallet_login():
+
+    wallet = wallet_connect(
+        label="🦊 Connect Wallet"
+    )
+
+    if not wallet:
+        return None
+
+    auth = (
+        supabase
+        .auth
+        .sign_in_with_web3({
+            "chain": "ethereum",
+            "statement":
+                "Login to Hando Analytics"
+        })
+    )
+
+    if not auth.session:
+        return None
+
+    return (
+        auth
+        .session
+        .access_token
+    )
+
+
+# ==================================
 # DATA ENGINE
 # ==================================
 @st.cache_data(
-    ttl=600,
-    show_spinner=False
+    ttl=600
 )
 def deep_sync(token):
 
-    token = (
-        token
-        .strip()
-        .replace(
-            "Bearer ",
-            ""
-        )
-    )
-
     headers = {
-        "apikey": API_KEY,
-        "authorization": f"Bearer {token}",
-        "content-type": "application/json"
+        "apikey": SUPABASE_KEY,
+        "authorization":
+            f"Bearer {token}",
+        "content-type":
+            "application/json"
     }
 
     try:
@@ -216,27 +288,17 @@ def deep_sync(token):
         rows = []
 
         skip = 0
-        batch = 1000
-
-        sync = st.empty()
 
         while True:
-
-            sync.info(
-                f"Syncing {skip}"
-            )
 
             r = requests.post(
                 API_URL_HIS,
                 headers=headers,
                 json={
                     "skip": skip,
-                    "take": batch
+                    "take": 1000
                 }
             )
-
-            if r.status_code != 200:
-                break
 
             packet = r.json()
 
@@ -245,18 +307,23 @@ def deep_sync(token):
 
             rows.extend(packet)
 
-            if len(packet) < batch:
+            if len(packet) < 1000:
                 break
 
-            skip += batch
-
-        sync.empty()
+            skip += 1000
 
         if not rows:
 
-            return None, 0, [], "No data"
+            return (
+                None,
+                0,
+                [],
+                "No data"
+            )
 
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(
+            rows
+        )
 
         d_col = next(
             c for c in df.columns
@@ -308,8 +375,13 @@ def deep_sync(token):
             .dt.date
         )
 
-        df["NODE_RAW"] = df[node_col]
-        df["LIC_RAW"] = df[lic_col]
+        df["NODE_RAW"] = (
+            df[node_col]
+        )
+
+        df["LIC_RAW"] = (
+            df[lic_col]
+        )
 
         df["NODE_ID"] = (
             df["NODE_RAW"]
@@ -338,25 +410,38 @@ def deep_sync(token):
 # ==================================
 with st.sidebar:
 
-    st.markdown("## Hando.")
-
-    st.link_button(
-        "🦊 Open Unity Login",
-        "https://manage.unitynodes.io",
-        use_container_width=True
+    st.markdown(
+        "## Hando."
     )
 
-    token = st.text_area(
-        "Paste Unity Token",
-        height=150
-    )
+    if "unity_token" not in st.session_state:
 
-    if st.button(
-        "Refresh",
-        use_container_width=True
-    ):
-        st.cache_data.clear()
-        st.rerun()
+        token = (
+            unity_wallet_login()
+        )
+
+        if token:
+
+            st.session_state[
+                "unity_token"
+            ] = token
+
+            st.rerun()
+
+    else:
+
+        st.success(
+            "Wallet Connected"
+        )
+
+        if st.button(
+            "Disconnect",
+            use_container_width=True
+        ):
+
+            st.session_state.clear()
+
+            st.rerun()
 
 
 # ==================================
@@ -366,24 +451,34 @@ st.title(
     "Analytics Overview"
 )
 
-if token:
+if "unity_token" in st.session_state:
 
     df, balance, all_licenses, err = (
-        deep_sync(token)
+        deep_sync(
+            st.session_state[
+                "unity_token"
+            ]
+        )
     )
 
-    if df is not None:
+    if df is None:
+
+        st.error(
+            err
+        )
+
+    else:
 
         now = datetime.now()
 
-        today = now.date()
-
-        yesterday = (
-            today - timedelta(days=1)
+        week = (
+            now.date()
+            - timedelta(days=7)
         )
 
-        week = (
-            today - timedelta(days=7)
+        yesterday = (
+            now.date()
+            - timedelta(days=1)
         )
 
         rev7 = df[
@@ -394,7 +489,9 @@ if token:
             df["date_only"] == yesterday
         ]["usd_amount"].sum()
 
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3 = (
+            st.columns(3)
+        )
 
         m1.metric(
             "Wallet",
@@ -411,9 +508,7 @@ if token:
             f"${rev1:,.4f}"
         )
 
-        # ==================
-        # LICENSE STATUS
-        # ==================
+        # licenses
         active = set(
             str(x)
             for x in df[
@@ -426,7 +521,7 @@ if token:
             for x in all_licenses
         )
 
-        inactive = sorted(
+        inactive = (
             known - active
         )
 
@@ -434,82 +529,19 @@ if token:
             "License Status"
         )
 
-        c1, c2 = st.columns(2)
+        l1, l2 = st.columns(2)
 
-        c1.metric(
+        l1.metric(
             "Active",
             len(active)
         )
 
-        c2.metric(
+        l2.metric(
             "Inactive",
             len(inactive)
         )
 
-        if inactive:
-
-            st.dataframe(
-                pd.DataFrame({
-                    "Inactive Licenses": [
-                        format_id(x)
-                        for x in inactive
-                    ]
-                }),
-                hide_index=True,
-                use_container_width=True
-            )
-
-        # ==================
-        # HEARTBEAT
-        # ==================
-        st.subheader(
-            "Heartbeat"
-        )
-
-        payouts = (
-            df.groupby(
-                "LIC_RAW"
-            )["timestamp"]
-            .max()
-            .to_dict()
-        )
-
-        html = (
-            '<div class="status-grid">'
-        )
-
-        for i, lic in enumerate(
-            sorted(active),
-            1
-        ):
-
-            hrs = (
-                now-payouts[lic]
-            ).total_seconds()/3600
-
-            if hrs <= 48:
-                cls = "bg-green"
-
-            elif hrs <= 96:
-                cls = "bg-yellow"
-
-            else:
-                cls = "bg-red"
-
-            html += (
-                f'<div class="status-box {cls}">#{i}</div>'
-            )
-
-        html += "</div>"
-
-        st.markdown(
-            html,
-            unsafe_allow_html=True
-        )
-
-        # ==================
-        # REVENUE
-        # ==================
+        # revenue chart
         st.subheader(
             "Revenue"
         )
@@ -533,9 +565,7 @@ if token:
             use_container_width=True
         )
 
-        # ==================
-        # NODE MAP
-        # ==================
+        # node map
         st.subheader(
             "Node Intelligence"
         )
@@ -547,8 +577,13 @@ if token:
             .agg({
                 "LIC_RAW":
                     lambda x:
-                    sorted(
-                        set(x)
+                    "\n".join(
+                        sorted(
+                            set(
+                                format_id(v)
+                                for v in x
+                            )
+                        )
                     ),
                 "usd_amount":
                     "sum"
@@ -562,41 +597,14 @@ if token:
             "Total"
         ]
 
-        nodes["Count"] = (
-            nodes["Licenses"]
-            .apply(len)
-        )
-
-        nodes["Licenses"] = (
-            nodes["Licenses"]
-            .apply(
-                lambda x:
-                "\n".join(
-                    format_id(v)
-                    for v in x
-                )
-            )
-        )
-
         st.dataframe(
-            nodes[
-                [
-                    "Node",
-                    "Count",
-                    "Licenses",
-                    "Total"
-                ]
-            ],
+            nodes,
             hide_index=True,
             use_container_width=True
         )
 
-    else:
-
-        st.error(err)
-
 else:
 
     st.info(
-        "Open Unity login, copy your token, paste it here."
+        "Connect your wallet."
     )
